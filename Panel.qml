@@ -107,8 +107,8 @@ Ui.Panel {
     if (actionIndex === 0) service.push()
     else if (actionIndex === 1) service.pull(false)
     else if (actionIndex === 2) service.toggleSync()
-    else if (actionIndex === 3) startEditing()
-    else if (actionIndex === 4) showHistory()
+    else if (actionIndex === 3) showHistory()
+    else if (actionIndex === 4) startEditing()
   }
   Connections {
     target: root.service
@@ -270,14 +270,21 @@ Ui.Panel {
             text: !root.service ? "" : root.favoriteError !== "" ? root.errorText(root.favoriteError) : root.service.status.historyError ? strings.t("history_error") : root.service.status.logError ? strings.t("log_error") : root.service.status.dedupeFull ? strings.t("dedupe_full") : root.errorText(root.service.errorCode)
             color: Commons.Color.urgent; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap
           }
-          Flow {
+          Column {
             visible: !root.editing && !root.historyMode
             width: parent.width
-            spacing: Style.space(4)
-            Ui.Button { text: strings.t("upload"); focusable: true; hasCursor: root.actionIndex === 0 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.push() }
-            Ui.Button { text: strings.t("download"); focusable: true; hasCursor: root.actionIndex === 1 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.pull(false) }
-            Ui.Button { text: strings.t(root.syncEnabled ? "pause" : "resume"); focusable: true; hasCursor: root.actionIndex === 2 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.toggleSync() }
-            Ui.Button { text: strings.t("settings"); focusable: true; hasCursor: root.actionIndex === 3 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady; onClicked: root.startEditing() }
+            spacing: Style.space(6)
+            Row {
+              width: parent.width; spacing: Style.space(4)
+              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("upload"); bordered: true; focusable: true; hasCursor: root.actionIndex === 0 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.push() }
+              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("download"); bordered: true; focusable: true; hasCursor: root.actionIndex === 1 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.pull(false) }
+              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t(root.syncEnabled ? "pause" : "resume"); bordered: true; focusable: true; hasCursor: root.actionIndex === 2 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.toggleSync() }
+            }
+            Row {
+              width: parent.width; spacing: Style.space(4)
+              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("open_history"); bordered: true; focusable: true; hasCursor: root.actionIndex === 3 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.showHistory() }
+              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("settings"); bordered: true; focusable: true; hasCursor: root.actionIndex === 4 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady; onClicked: root.startEditing() }
+            }
           }
           Ui.PanelSectionHeader { visible: root.historyMode && !root.editing; width: parent.width; text: strings.t("history"); foreground: root.foreground }
           Text {
@@ -293,11 +300,6 @@ Ui.Panel {
             width: parent.width
             text: root.service && root.service.config.history && root.service.config.history.enabled ? strings.t("no_history") : strings.t("history_disabled")
             color: Qt.darker(root.foreground, 1.4); font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall
-          }
-          Ui.Button {
-            visible: !root.editing && !root.historyMode
-            text: strings.t("open_history"); focusable: true; hasCursor: root.actionIndex === 4 && keyCatcher.activeFocus
-            onClicked: root.showHistory()
           }
           Flow {
             visible: root.historyMode && !root.editing
