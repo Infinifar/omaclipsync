@@ -1,0 +1,39 @@
+name: Publish release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - name: Package the committed Linux x86_64 binaries
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version=$(jq -er '.version' manifest.json)
+          [[ "$RELEASE_TAG" == "v$version" ]]
+          ./scripts/package.sh --use-bundled
+          (cd dist && sha256sum "omaclipsync-plugin-$version.tar.gz" syncclipd-linux-x86_64 > SHA256SUMS)
+      - name: Attach assets to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version=$(jq -er '.version' manifest.json)
+          [[ "$RELEASE_TAG" == "v$version" ]]
+          gh release upload "$RELEASE_TAG" "dist/omaclipsync-plugin-$version.tar.gz" dist/syncclipd-linux-x86_64 dist/SHA256SUMS

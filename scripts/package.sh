@@ -7,16 +7,26 @@ version=$(jq -er '.version' "$root/manifest.json")
 if [[ -n $(find "$root" -path "$root/core/target" -prune -o -path "$root/target" -prune -o -path "$root/dist" -prune -o -name .git -prune -o -type l -print -quit) ]]; then
   printf '%s\n' 'Source directory contains a symbolic link.' >&2; exit 1
 fi
-cargo build --manifest-path "$root/core/Cargo.toml" --locked --release --bins
-build_dir=${CARGO_TARGET_DIR:-"$root/core/target"}
-binary="$build_dir/release/syncclipd"
+if [[ ${1:-} == --use-bundled && $# == 1 ]]; then
+  binary="$root/bin/syncclipd"
+  client="$root/bin/syncclipctl"
+elif [[ $# == 0 ]]; then
+  cargo build --manifest-path "$root/core/Cargo.toml" --locked --release --bins
+  build_dir=${CARGO_TARGET_DIR:-"$root/core/target"}
+  binary="$build_dir/release/syncclipd"
+  client="$build_dir/release/syncclipctl"
+else
+  printf '%s\n' 'Usage: package.sh [--use-bundled]' >&2
+  exit 1
+fi
 [[ -f $binary ]] || { printf '%s\n' 'Built daemon not found.' >&2; exit 1; }
+[[ -f $client ]] || { printf '%s\n' 'Built client not found.' >&2; exit 1; }
 [[ $(stat -c %s "$binary") -lt 15728640 ]] || { printf '%s\n' 'Daemon exceeds 15 MiB.' >&2; exit 1; }
 stage=$(mktemp -d)
 trap 'rm -rf -- "$stage"' EXIT
 mkdir -p "$stage/bin" "$stage/core" "$stage/scripts" "$stage/tests" "$root/dist"
 install -m 0755 "$binary" "$stage/bin/syncclipd"
-install -m 0755 "$build_dir/release/syncclipctl" "$stage/bin/syncclipctl"
+install -m 0755 "$client" "$stage/bin/syncclipctl"
 cp "$root/manifest.json" "$root/Service.qml" "$root/BarWidget.qml" "$root/Panel.qml" "$root/Settings.js" "$root/README.md" "$root/ACCEPTANCE.md" "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$stage/"
 cp -R "$root/third-party-licenses" "$stage/third-party-licenses"
 cp -R "$root/i18n" "$stage/i18n"
