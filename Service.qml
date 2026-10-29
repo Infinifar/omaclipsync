@@ -1,6 +1,8 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 
 Item {
   id: root
@@ -28,6 +30,13 @@ Item {
   signal replied(int id, string method, bool ok, var result, string error)
   signal historyRequested()
   signal iconVisibilityRequested(bool visible)
+  Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
+
+  function notifySuccess(outcome) {
+    if (!ready) return
+    if (outcome !== "uploaded" && outcome !== "downloaded") return
+    Quickshell.execDetached(["notify-send", "--app-name=Omaclipsync", strings.t("title"), strings.t(outcome === "uploaded" ? "notify_pushed" : "notify_received")])
+  }
 
   function daemonPath() {
     return decodeURIComponent(String(Qt.resolvedUrl("bin/syncclipd")).replace(/^file:\/\//, ""))
@@ -43,6 +52,7 @@ Item {
     var message
     try { message = JSON.parse(line) } catch (e) { return }
     if (message.event === "activity" && message.data) { automaticBusy = message.data.active === true; return }
+    if (message.event === "sync_success" && message.data) { notifySuccess(message.data.outcome); return }
     if (message.event === "status" && message.data && typeof message.data === "object") {
       let oldRevision = status.configRevision
       status = message.data

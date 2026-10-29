@@ -22,7 +22,10 @@ Omaclipsync 是 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard) 的 Om
 - **自动恢复**：实时连接中断后回退到低频轮询；默认 60 秒，可设置 30–300 秒。旧配置低于 30 秒时按 30 秒执行。后台按退避策略重连，恢复后立即检查最新内容。
 - **融入桌面**：顶栏显示连接状态，面板提供推送、接收和暂停；支持中文和英文随系统语言切换。
 - **可选的本地历史**：默认关闭，可浏览、复制、粘贴和收藏最多 5 条；收藏置顶，清空普通历史时保留。启用后内容以明文保存在本机，也可以使用系统剪贴板历史代替。
+- **同步通知**：默认开启，可在设置中关闭。成功推送或接收新文本时显示通知，不包含剪贴板正文；内容未变化或同步失败时不提示成功。
 - **过滤与去重**：支持正则黑名单、白名单和可选的接收过滤；默认 5 分钟内不重复写入相同的远端内容，可手动强制接收。
+
+如果通知没有弹出，可以运行 `omarchy shell notifications isDnd` 检查 Omarchy 的勿扰模式。在 Omarchy 4.5.0 RC 中，开启勿扰时通知会保留在通知历史中，但不会弹窗。可在 Omarchy 中关闭勿扰，或运行 `omarchy shell notifications setDnd off` 恢复弹窗。
 
 ## 使用前须知与限制
 
@@ -34,7 +37,7 @@ Omaclipsync 是 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard) 的 Om
 
 ## 安装
 
-**依赖**：可用的 Secret Service 密钥环及 `secret-tool`；原生剪贴板监听不可用时需要 `wl-paste`；历史条目的自动粘贴需要 `wtype`。使用 Git 安装还需要 Git 和受信任的 HTTPS 服务器。
+**依赖**：可用的 Secret Service 密钥环及 `secret-tool`；通知需要 `notify-send` 和通知服务；原生剪贴板监听不可用时需要 `wl-paste`；历史条目的自动粘贴需要 `wtype`。使用 Git 安装还需要 Git 和受信任的 HTTPS 服务器。
 
 插件运行在未沙箱化的 Omarchy shell 中，具有当前用户权限；请先审阅源码及仓库内的 x86_64 预编译二进制。安装并启用：
 
@@ -130,6 +133,8 @@ omarchy plugin remove io.github.infinifar.omaclipsync
 ```
 
 移除插件不会自动删除配置、历史、日志或密钥环项，请按需自行清理。手动复制安装的目录在某些 Omarchy 版本中可能被移至隐藏备份；请留意命令输出。重新启用旧 `omaclipsync` 插件前，请先禁用新插件，避免两个客户端同时运行。回退到 v0.1.1 前应备份历史文件并取消全部收藏：该版本无法读取包含收藏字段的历史。
+
+回退到不支持同步通知的旧版本时，请先备份配置，并在启动旧版服务前从 JSON 配置中移除 `sync.notifyOnSuccess`；旧版会拒绝未知配置字段。
 
 ## 从源码构建
 

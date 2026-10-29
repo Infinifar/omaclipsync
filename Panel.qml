@@ -179,6 +179,7 @@ Ui.Panel {
       property string filterValue: "off"
       property bool blockDownloads: false
       property bool historyEnabled: false
+      property bool notifyOnSuccess: true
       property bool showIcon: true
       property bool insecure: false
       property int intervalValue: 60
@@ -193,6 +194,7 @@ Ui.Panel {
         intervalValue = Math.max(30, Math.min(300, Number(sync.intervalSec || 60))); filterValue = String(filter.mode || "off")
         patternsField.text = (filter.patterns || []).join("\n")
         blockDownloads = filter.alsoBlockDownloads === true; historyEnabled = history.enabled === true
+        notifyOnSuccess = sync.notifyOnSuccess !== false
         showIcon = root.hostWidget ? root.hostWidget.iconShown : true
         historyLimit = Number(history.limit || 50); dedupeValue = dedupe.windowSec === undefined ? 300 : Number(dedupe.windowSec)
         insecure = server.insecure === true; testField.text = ""
@@ -203,7 +205,7 @@ Ui.Panel {
         var old = root.service.config || ({})
         var config = {
           server: {url: urlField.text.trim(), user: userField.text.trim(), insecure: insecure},
-          sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768},
+          sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768, notifyOnSuccess: notifyOnSuccess},
           filter: filterConfig(), history: {enabled: historyEnabled, limit: historyLimit},
           dedupe: {windowSec: dedupeValue}, logging: old.logging || {level: "info"}
         }
@@ -345,6 +347,7 @@ Ui.Panel {
             Ui.PanelSectionHeader { width: parent.width; text: strings.t("settings"); foreground: root.foreground }
             Text { textFormat: Text.PlainText; width: parent.width; text: strings.t("setup_hint"); color: Qt.darker(root.foreground, 1.4); font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap }
             Ui.Toggle { width: parent.width; label: strings.t("show_icon"); description: strings.t("show_icon_note"); checked: keyCatcher.showIcon; onClicked: keyCatcher.showIcon = !keyCatcher.showIcon }
+            Ui.Toggle { width: parent.width; label: strings.t("notify_on_success"); description: strings.t("notify_note"); checked: keyCatcher.notifyOnSuccess; onClicked: keyCatcher.notifyOnSuccess = !keyCatcher.notifyOnSuccess }
             Text { textFormat: Text.PlainText; text: strings.t("url"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }
             Ui.TextField { id: urlField; width: parent.width; LayoutMirroring.enabled: false; placeholderText: "https://…" }
             Text { textFormat: Text.PlainText; text: strings.t("username"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }

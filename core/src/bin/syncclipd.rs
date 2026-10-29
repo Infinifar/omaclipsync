@@ -534,7 +534,10 @@ impl App {
         if let Some(text) = self.pending.take() {
             let result = self.session.as_mut().unwrap().local_changed(&text);
             match result {
-                Ok(outcome) => self.note_outcome(&outcome),
+                Ok(outcome) => {
+                    self.note_outcome(&outcome);
+                    emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
+                }
                 Err(err) => {
                     self.pending = Some(text);
                     self.failure(err);
@@ -548,6 +551,7 @@ impl App {
             match result {
                 Ok(outcome) => {
                     self.note_outcome(&outcome);
+                    emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
                     self.log(Event::Polled);
                     self.pull_pending = false;
                     self.next_fallback = Instant::now() + self.fallback_interval();
@@ -937,6 +941,16 @@ fn outcome_name(outcome: &Outcome) -> &'static str {
         Outcome::Capacity => "capacity",
     }
 }
+
+fn emit_sync_success(out: &mut impl Write, outcome: &Outcome, enabled: bool) {
+    if enabled && matches!(outcome, Outcome::Uploaded | Outcome::Downloaded) {
+        let _ = protocol::event(
+            out,
+            "sync_success",
+            &json!({"outcome": outcome_name(outcome)}),
+        );
+    }
+}
 fn main() {
     if env::args().nth(1).as_deref() == Some("--watch-event") {
         watch_event();
@@ -991,7 +1005,20 @@ fn main() {
         let mut shutdown = false;
         match msg {
             Message::Request(req) => {
+                let manual_sync = matches!(req.method.as_str(), "push" | "pull");
                 let (id, result, stop) = app.handle(req);
+                if manual_sync && app.config.sync.notify_on_success {
+                    if let Ok(value) = &result {
+                        let outcome = match value.get("outcome").and_then(Value::as_str) {
+                            Some("uploaded") => Some(Outcome::Uploaded),
+                            Some("downloaded") => Some(Outcome::Downloaded),
+                            _ => None,
+                        };
+                        if let Some(outcome) = outcome {
+                            emit_sync_success(&mut out, &outcome, true);
+                        }
+                    }
+                }
                 let result = result.as_ref().map_err(|e| *e);
                 if protocol::reply(&mut out, id, result).is_err() {
                     break;
@@ -1042,6 +1069,29 @@ fn main() {
 mod tests {
     use super::*;
     use omaclipsync_core::{Filter, FilterMode};
+
+    #[test]
+    fn success_events_only_report_actual_transfers_when_enabled() {
+        let mut output = Vec::new();
+        emit_sync_success(&mut output, &Outcome::Uploaded, false);
+        emit_sync_success(&mut output, &Outcome::Current, true);
+        emit_sync_success(&mut output, &Outcome::Skipped, true);
+        assert!(output.is_empty());
+        emit_sync_success(&mut output, &Outcome::Uploaded, true);
+        emit_sync_success(&mut output, &Outcome::Downloaded, true);
+        let events: Vec<Value> = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            events,
+            vec![
+                json!({"event":"sync_success", "data":{"outcome":"uploaded"}}),
+                json!({"event":"sync_success", "data":{"outcome":"downloaded"}})
+            ]
+        );
+    }
     #[test]
     fn reconnecting_local_watcher_preserves_network_and_auth_backoff() {
         let dir = tempfile::tempdir().unwrap();

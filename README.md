@@ -22,7 +22,10 @@ The screenshot shows the running plugin; the server address and last synchroniza
 - **Automatic recovery**: when the real-time connection is unavailable, the client falls back to polling every 60 seconds by default, configurable from 30 to 300 seconds. Older values below 30 seconds are treated as 30 seconds. Reconnection uses backoff and checks the latest state immediately after reconnecting.
 - **Desktop integration**: bar status and controls for push, receive, and pause, with live English and Chinese translations.
 - **Optional local history**: off by default; browse, copy, paste, and favorite up to five entries. Favorites stay at the top and survive clearing ordinary history. Enabled history is stored as plaintext; system clipboard history can be used instead.
+- **Sync notifications**: enabled by default and configurable in Settings. Successful pushes and receives show a notification without revealing clipboard text; unchanged and failed operations do not.
 - **Filtering and deduplication**: regex blacklist or whitelist, optional filtering on receive, and a default five-minute deduplication window. Manual forced receive is available.
+
+If notifications do not appear, check Omarchy's Do Not Disturb mode with `omarchy shell notifications isDnd`. On Omarchy 4.5.0 RC, notifications received while it is on are kept in notification history without a pop-up. Turn it off in Omarchy or run `omarchy shell notifications setDnd off` to allow pop-ups again.
 
 ## Requirements and limitations
 
@@ -34,7 +37,7 @@ The screenshot shows the running plugin; the server address and last synchroniza
 
 ## Install
 
-**Dependencies**: an available Secret Service keyring and `secret-tool`; `wl-paste` is needed if native clipboard watching is unavailable; `wtype` is needed for automatic pasting from history. Git installation also requires Git and a trusted HTTPS server.
+**Dependencies**: an available Secret Service keyring and `secret-tool`; `notify-send` and a notification service for notifications; `wl-paste` is needed if native clipboard watching is unavailable; `wtype` is needed for automatic pasting from history. Git installation also requires Git and a trusted HTTPS server.
 
 Plugins run as unsandboxed code with your user's permissions inside Omarchy shell. Review the source and bundled x86_64 binaries before installing and enabling:
 
@@ -130,6 +133,8 @@ omarchy plugin remove io.github.infinifar.omaclipsync
 ```
 
 Uninstalling the plugin does not automatically delete configuration, history, logs, or keyring entries; remove those separately if desired. Some Omarchy versions move a manually copied plugin directory to a hidden backup; check the command output. Before re-enabling the old `omaclipsync` plugin, first disable the new plugin to avoid running both clients. Before rolling back to v0.1.1, back up the history file and remove all favorites: that version cannot read history containing favorite fields.
+
+When rolling back to a build without sync notifications, back up the configuration and remove `sync.notifyOnSuccess` from the JSON configuration before starting the older daemon; older builds reject unknown configuration fields.
 
 ## Build from source
 

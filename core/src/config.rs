@@ -32,6 +32,7 @@ pub struct SyncConfig {
     pub interval_sec: u64,
     pub enabled: bool,
     pub max_inline_bytes: usize,
+    pub notify_on_success: bool,
 }
 impl Default for SyncConfig {
     fn default() -> Self {
@@ -39,6 +40,7 @@ impl Default for SyncConfig {
             interval_sec: 60,
             enabled: true,
             max_inline_bytes: 32768,
+            notify_on_success: true,
         }
     }
 }
@@ -204,6 +206,9 @@ mod tests {
         let mut cfg = Config::default();
         assert!(!cfg.history.enabled);
         assert_eq!(cfg.sync.interval_sec, 60);
+        assert!(cfg.sync.notify_on_success);
+        let old: Config = serde_json::from_str(r#"{"sync":{"enabled":true}}"#).unwrap();
+        assert!(old.sync.notify_on_success);
         cfg.server.url = "https://example.org/base".into();
         cfg.write(&path).unwrap();
         assert_eq!(
