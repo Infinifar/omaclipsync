@@ -20,6 +20,12 @@
     "defaultSection": "right",
     "schema": [
       {
+        "key": "showIcon",
+        "type": "boolean",
+        "label": "Show bar icon",
+        "defaultValue": true
+      },
+      {
         "key": "refreshIntervalSec",
         "type": "integer",
         "label": "Fallback polling interval (seconds)",

@@ -11,3 +11,14 @@ assert.equal(settings.merge(original, {filterEnabled: false}).filter.mode, "off"
 assert.equal(settings.merge({sync: {}, filter: {mode: "off"}, history: {}}, {filterEnabled: true}).filter.mode, "blacklist")
 assert.deepEqual(settings.values(original), {refreshIntervalSec: 30, filterEnabled: true, historyEnabled: false})
 assert.equal(settings.merge(original, {refreshIntervalSec: 3}).sync.intervalSec, 30)
+
+// Hiding the icon only changes the shell entry, preserving unrelated settings.
+const barEntry = {id: "old", showIcon: true, refreshIntervalSec: 60, futureOption: "keep"}
+assert.deepEqual(settings.inlineEntry("plugin", barEntry, null, false), {id: "plugin", showIcon: false, refreshIntervalSec: 60, futureOption: "keep"})
+assert.equal(barEntry.showIcon, true)
+assert.equal(settings.inlineSame(barEntry, settings.inlineEntry("plugin", barEntry, null, true)), true)
+assert.equal(settings.inlineSame(barEntry, settings.inlineEntry("plugin", barEntry, null, false)), false)
+assert.equal(settings.inlineSame({}, {id:"plugin", showIcon:true}), false)
+const reflected = settings.inlineEntry("plugin", {showIcon: false, futureOption: "keep"}, original)
+assert.deepEqual(reflected, {id: "plugin", showIcon: false, futureOption: "keep", refreshIntervalSec: 30, filterEnabled: true, historyEnabled: false})
+assert.equal(Object.prototype.hasOwnProperty.call(settings.merge(original, {}), "showIcon"), false)

@@ -10,6 +10,8 @@ BarWidget {
   readonly property var barApi: bar
   readonly property var panelItem: panelLoader.item
   readonly property var service: barApi && barApi.shell && typeof barApi.shell.serviceFor === "function" ? barApi.shell.serviceFor(moduleName) : null
+  readonly property bool iconShown: setting("showIcon", true) !== false
+  visible: iconShown
   property bool settingsObserved: false
   property var previousWidgetSettings: ({})
   property var pendingWidgetSettings: ({})
@@ -43,20 +45,24 @@ BarWidget {
     var id = service.request("set_config", {config: next})
     if (id) { widgetRequestId = id; inFlightWidgetSettings = pendingWidgetSettings; pendingWidgetSettings = ({}) }
   }
-  function reflectSettings(config) {
-    if (!barApi || !barApi.shell || typeof barApi.shell.updateEntryInline !== "function") return
-    var entry = {id: moduleName}
-    for (let key in settings) if (key !== "id") entry[key] = settings[key]
-    var values = Settings.values(config)
-    for (let field in values) entry[field] = values[field]
+  function reflectSettings(config, showIcon) {
+    if (!barApi || !barApi.shell || typeof barApi.shell.updateEntryInline !== "function") return false
+    var entry = Settings.inlineEntry(moduleName, settings, config, showIcon)
+    var unchanged = Settings.inlineSame(settings, entry)
+    var previous = previousWidgetSettings
+    var wasObserved = settingsObserved
     previousWidgetSettings = Settings.snapshot(entry)
     settingsObserved = true
-    barApi.shell.updateEntryInline(moduleName, entry)
+    if (barApi.shell.updateEntryInline(moduleName, entry) || unchanged) return true
+    previousWidgetSettings = previous
+    settingsObserved = wasObserved
+    return false
   }
   Connections {
     target: root.service
     ignoreUnknownSignals: true
     function onHistoryRequested() { if (root.panelItem) root.panelItem.showHistory() }
+    function onIconVisibilityRequested(visible) { root.reflectSettings(null, visible) }
     function onReadyChanged() {
       if (!root.service.ready && root.widgetRequestId) {
         root.pendingWidgetSettings = Object.assign({}, root.inFlightWidgetSettings, root.pendingWidgetSettings)

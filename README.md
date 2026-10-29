@@ -73,6 +73,27 @@ For example, after checking for shortcut conflicts, add this to a compatible Oma
 o.bind("SUPER + ALT + V", "Omaclipsync history", "omarchy shell io.github.infinifar.omaclipsync openHistory")
 ```
 
+**Show bar icon** is enabled by default in Settings. Turning it off hides the icon while the service continues to run. Configure a history shortcut before hiding the icon so you can open history and return to Settings to show it again. Keep the Omaclipsync widget in the bar layout: removing it or disabling the plugin is different from hiding its icon and may make the panel unavailable.
+
+You can also open the main panel directly and re-enable **Show bar icon** in Settings:
+
+```sh
+omarchy shell io.github.infinifar.omaclipsync open
+# Alternatively:
+omarchy shell shell summon io.github.infinifar.omaclipsync '{}'
+```
+
+To request that the icon be shown or hidden without opening the panel:
+
+```sh
+omarchy shell io.github.infinifar.omaclipsync showIcon
+omarchy shell io.github.infinifar.omaclipsync hideIcon
+```
+
+These commands return `queued` when the request is sent, not when the change has completed. They can be queued even if the daemon is offline, so `showIcon` can be used to attempt recovery; the widget must still be present in the bar layout for either request to take effect.
+
+The hidden-icon mode is implemented but has not yet been verified on a running desktop.
+
 Other commands:
 
 ```sh

@@ -73,6 +73,27 @@ omarchy shell io.github.infinifar.omaclipsync openHistory
 o.bind("SUPER + ALT + V", "Omaclipsync history", "omarchy shell io.github.infinifar.omaclipsync openHistory")
 ```
 
+设置中的 **显示顶栏图标** 默认开启。关闭后只隐藏图标，服务继续运行。建议隐藏前先配置历史快捷键，以便打开历史面板、返回设置并重新显示图标。请保留 Omaclipsync 在顶栏布局中的组件：移除组件或禁用插件不同于隐藏图标，可能导致面板无法打开。
+
+也可以直接打开主面板，在设置中重新开启 **显示顶栏图标**：
+
+```sh
+omarchy shell io.github.infinifar.omaclipsync open
+# 或者：
+omarchy shell shell summon io.github.infinifar.omaclipsync '{}'
+```
+
+也可以不打开面板，直接请求显示或隐藏图标：
+
+```sh
+omarchy shell io.github.infinifar.omaclipsync showIcon
+omarchy shell io.github.infinifar.omaclipsync hideIcon
+```
+
+这些命令返回 `queued` 表示请求已发出，不代表更改已经完成。即使守护进程离线，也可以排队请求，尝试通过 `showIcon` 恢复图标；这两个请求都要求组件仍保留在顶栏布局中才会生效。
+
+隐藏图标模式已实现，但尚未在实际桌面验证。
+
 其他命令：
 
 ```sh

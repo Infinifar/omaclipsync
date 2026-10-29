@@ -24,6 +24,7 @@ Ui.Panel {
   property bool pasteAfterCopy: false
   property var pasteTarget: null
   property var pendingConfig: null
+  property bool pendingShowIcon: true
   property int settingsRequestId: 0
   property int passwordRequestId: 0
   property int testRequestId: 0
@@ -77,6 +78,7 @@ Ui.Panel {
     if (code === "sync_failed" || code === "not_configured") return strings.t("error_sync")
     if (code === "history_failed" || code === "history_not_found" || code === "history_disabled") return strings.t("error_history")
     if (code === "favorite_limit") return strings.t("favorite_limit")
+    if (code === "icon_setting_failed") return strings.t("icon_setting_failed")
     return strings.t("error_generic")
   }
   function startEditing() {
@@ -127,7 +129,9 @@ Ui.Panel {
         root.actionIndex = 0
       } else if (method === "set_config" && id === root.settingsRequestId) {
         if (!ok) { root.pendingPassword = ""; root.pendingConfig = null; root.formError = error || "unknown"; return }
-        if (root.pendingConfig && root.hostWidget && typeof root.hostWidget.reflectSettings === "function") root.hostWidget.reflectSettings(root.pendingConfig)
+        if (!root.pendingConfig || !root.hostWidget || typeof root.hostWidget.reflectSettings !== "function" || !root.hostWidget.reflectSettings(root.pendingConfig, root.pendingShowIcon)) {
+          root.pendingPassword = ""; root.pendingConfig = null; root.formError = "icon_setting_failed"; return
+        }
         root.pendingConfig = null
         if (root.pendingPassword !== "") {
           let password = root.pendingPassword; root.pendingPassword = ""
@@ -161,7 +165,7 @@ Ui.Panel {
     owner: root.identity
     bar: root.bar
     open: root.opened
-    centerOnBar: false
+    centerOnBar: !!root.hostWidget && !root.hostWidget.iconShown
     focusTarget: popup.loadedContent
     contentWidth: popup.fittedContentWidth(Style.space(430))
     contentHeight: popup.fittedContentHeight(popup.loadedContentHeight, Style.space(680))
@@ -175,6 +179,7 @@ Ui.Panel {
       property string filterValue: "off"
       property bool blockDownloads: false
       property bool historyEnabled: false
+      property bool showIcon: true
       property bool insecure: false
       property int intervalValue: 60
       property int historyLimit: 50
@@ -188,6 +193,7 @@ Ui.Panel {
         intervalValue = Math.max(30, Math.min(300, Number(sync.intervalSec || 60))); filterValue = String(filter.mode || "off")
         patternsField.text = (filter.patterns || []).join("\n")
         blockDownloads = filter.alsoBlockDownloads === true; historyEnabled = history.enabled === true
+        showIcon = root.hostWidget ? root.hostWidget.iconShown : true
         historyLimit = Number(history.limit || 50); dedupeValue = dedupe.windowSec === undefined ? 300 : Number(dedupe.windowSec)
         insecure = server.insecure === true; testField.text = ""
       }
@@ -201,7 +207,7 @@ Ui.Panel {
           filter: filterConfig(), history: {enabled: historyEnabled, limit: historyLimit},
           dedupe: {windowSec: dedupeValue}, logging: old.logging || {level: "info"}
         }
-        root.pendingConfig = config; root.pendingPassword = passwordField.text; root.pendingAccount = userField.text.trim(); passwordField.text = ""; root.formError = ""
+        root.pendingConfig = config; root.pendingShowIcon = showIcon; root.pendingPassword = passwordField.text; root.pendingAccount = userField.text.trim(); passwordField.text = ""; root.formError = ""
         root.settingsRequestId = root.service.request("set_config", {config: config}) || 0
         if (!root.settingsRequestId) { root.pendingPassword = ""; root.formError = "unknown" }
       }
@@ -338,6 +344,7 @@ Ui.Panel {
             spacing: Style.space(7)
             Ui.PanelSectionHeader { width: parent.width; text: strings.t("settings"); foreground: root.foreground }
             Text { textFormat: Text.PlainText; width: parent.width; text: strings.t("setup_hint"); color: Qt.darker(root.foreground, 1.4); font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap }
+            Ui.Toggle { width: parent.width; label: strings.t("show_icon"); description: strings.t("show_icon_note"); checked: keyCatcher.showIcon; onClicked: keyCatcher.showIcon = !keyCatcher.showIcon }
             Text { textFormat: Text.PlainText; text: strings.t("url"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }
             Ui.TextField { id: urlField; width: parent.width; LayoutMirroring.enabled: false; placeholderText: "https://…" }
             Text { textFormat: Text.PlainText; text: strings.t("username"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }

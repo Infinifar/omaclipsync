@@ -27,6 +27,7 @@ Item {
   }
   signal replied(int id, string method, bool ok, var result, string error)
   signal historyRequested()
+  signal iconVisibilityRequested(bool visible)
 
   function daemonPath() {
     return decodeURIComponent(String(Qt.resolvedUrl("bin/syncclipd")).replace(/^file:\/\//, ""))
@@ -93,6 +94,9 @@ Item {
 
   ShellIpc {
     target: "io.github.infinifar.omaclipsync"
+    function open(): string { return root.shell && root.shell.summon("io.github.infinifar.omaclipsync", "{}") ? "opened" : "unavailable" }
+    function showIcon(): string { root.iconVisibilityRequested(true); return "queued" }
+    function hideIcon(): string { root.iconVisibilityRequested(false); return "queued" }
     function pull(): string { return root.pull(false) ? "queued" : "unavailable" }
     function pullForce(): string { return root.pull(true) ? "queued" : "unavailable" }
     function push(): string { return root.push() ? "queued" : "unavailable" }
