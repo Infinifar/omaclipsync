@@ -39,7 +39,7 @@ ln -s /usr/share/omarchy/shell "$qml_imports/qs"
 rm "$qml_imports/qs" && rmdir "$qml_imports"
 ```
 
-打包脚本生成 `dist/syncclipd-linux-x86_64` 和 `dist/omaclipsync-plugin-0.1.3.tar.gz`，不修改桌面加载目录。`.gitlab-ci.yml` 定义格式、Clippy、测试和打包；版本标签触发的 GitLab Release 流程尚未验证。Git 安装源包含 x86_64 Linux 的预编译 `bin/syncclipd` 和 `bin/syncclipctl`，源码位于 `core/`；可以按上述步骤自行重建并验证。插件加载时运行仓库内的守护进程，不会在安装时下载或执行其他代码。
+打包脚本生成 `dist/syncclipd-linux-x86_64` 和 `dist/omaclipsync-plugin-0.1.4.tar.gz`，不修改桌面加载目录。`.gitlab-ci.yml` 定义格式、Clippy、测试和打包；版本标签触发的 GitLab Release 流程尚未验证。Git 安装源包含 x86_64 Linux 的预编译 `bin/syncclipd` 和 `bin/syncclipctl`，源码位于 `core/`；可以按上述步骤自行重建并验证。插件加载时运行仓库内的守护进程，不会在安装时下载或执行其他代码。
 
 协议参照 [SyncClipboard 上游源码](https://github.com/Jeric-X/SyncClipboard)，核对版本 `fd25fd62409967a69cec842cabaec2c00adf901d`；原生监听基于 [wl-clipboard-rs 0.9.5](https://docs.rs/wl-clipboard-rs/0.9.5/wl_clipboard_rs/watch/index.html)。
 
@@ -55,7 +55,7 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 
 ```sh
 plugin_dir="$HOME/.config/omarchy/plugins/omaclipsync"
-archive="$PWD/dist/omaclipsync-plugin-0.1.3.tar.gz"
+archive="$PWD/dist/omaclipsync-plugin-0.1.4.tar.gz"
 if [ -e "$plugin_dir" ] || [ -L "$plugin_dir" ]; then
   printf '%s\n' '目标已存在，请先备份并选择其他处理方式。' >&2
 else

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omaclipsync",
   "name": "Omaclipsync",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Text clipboard synchronization for the Omarchy bar.",
   "kinds": [
     "service",

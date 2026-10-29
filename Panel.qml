@@ -93,6 +93,7 @@ Ui.Panel {
       if (actionIndex === 0) { historyMode = false; actionIndex = 0 }
       else if (actionIndex === 1 && service.historyOffset > 0) { service.reloadHistory(Math.max(0, service.historyOffset - 20)); actionIndex = 0 }
       else if (actionIndex === 2 && service.historyOffset + 20 < service.historyTotal) { service.reloadHistory(service.historyOffset + 20); actionIndex = 0 }
+      else if (actionIndex === 3 + 3 * service.history.length && service.config.history && service.config.history.enabled) service.request("clear_history")
       else if (actionIndex >= 3) {
         let index = Math.floor((actionIndex - 3) / 3)
         let action = (actionIndex - 3) % 3
@@ -108,7 +109,6 @@ Ui.Panel {
     else if (actionIndex === 2) service.toggleSync()
     else if (actionIndex === 3) startEditing()
     else if (actionIndex === 4) showHistory()
-    else if (service) service.request("clear_history")
   }
   Connections {
     target: root.service
@@ -123,6 +123,8 @@ Ui.Panel {
         root.favoriteRequestId = 0
         if (!ok) root.favoriteError = error || "history_failed"
         else { root.favoriteError = ""; root.service.reloadHistory(root.service.historyOffset) }
+      } else if (method === "clear_history" && ok) {
+        root.actionIndex = 0
       } else if (method === "set_config" && id === root.settingsRequestId) {
         if (!ok) { root.pendingPassword = ""; root.pendingConfig = null; root.formError = error || "unknown"; return }
         if (root.pendingConfig && root.hostWidget && typeof root.hostWidget.reflectSettings === "function") root.hostWidget.reflectSettings(root.pendingConfig)
@@ -206,13 +208,13 @@ Ui.Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onMoveRequested: function(dx, dy) {
-        root.actionIndex = Math.max(0, Math.min(root.historyMode ? 2 + 3 * (root.service ? root.service.history.length : 0) : (root.service && root.service.config.history && root.service.config.history.enabled ? 5 : 4), root.actionIndex + (dx || dy)))
-        if (root.historyMode && root.actionIndex >= 3) {
-          let row = historyRepeater.itemAt(Math.floor((root.actionIndex - 3) / 3))
-          if (row) {
-            let top = row.mapToItem(body, 0, 0).y
+        root.actionIndex = Math.max(0, Math.min(root.historyMode ? 2 + 3 * (root.service ? root.service.history.length : 0) + (root.service && root.service.config.history && root.service.config.history.enabled ? 1 : 0) : 4, root.actionIndex + (dx || dy)))
+        if (root.historyMode && root.actionIndex >= 3 && root.service) {
+          let target = root.actionIndex === 3 + 3 * root.service.history.length ? clearHistoryButton : historyRepeater.itemAt(Math.floor((root.actionIndex - 3) / 3))
+          if (target && target.visible) {
+            let top = target.mapToItem(body, 0, 0).y
             if (top < scroll.contentY) scroll.contentY = Math.max(0, top)
-            else if (top + row.height > scroll.contentY + scroll.height) scroll.contentY = Math.min(scroll.contentHeight - scroll.height, top + row.height - scroll.height)
+            else if (top + target.height > scroll.contentY + scroll.height) scroll.contentY = Math.min(scroll.contentHeight - scroll.height, top + target.height - scroll.height)
           }
         } else if (root.historyMode) scroll.contentY = 0
       }
@@ -277,7 +279,7 @@ Ui.Panel {
             Ui.Button { text: strings.t(root.syncEnabled ? "pause" : "resume"); focusable: true; hasCursor: root.actionIndex === 2 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.toggleSync() }
             Ui.Button { text: strings.t("settings"); focusable: true; hasCursor: root.actionIndex === 3 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady; onClicked: root.startEditing() }
           }
-          Ui.PanelSectionHeader { visible: !root.editing; width: parent.width; text: strings.t("history"); foreground: root.foreground }
+          Ui.PanelSectionHeader { visible: root.historyMode && !root.editing; width: parent.width; text: strings.t("history"); foreground: root.foreground }
           Text {
             textFormat: Text.PlainText
             visible: root.historyMode && !root.editing && root.service && root.service.config.history && root.service.config.history.enabled
@@ -287,20 +289,10 @@ Ui.Panel {
           }
           Text {
             textFormat: Text.PlainText
-            visible: !root.editing && (!root.service || !root.service.config.history || !root.service.config.history.enabled || root.service.history.length === 0)
+            visible: root.historyMode && !root.editing && (!root.service || !root.service.config.history || !root.service.config.history.enabled || root.service.history.length === 0)
             width: parent.width
             text: root.service && root.service.config.history && root.service.config.history.enabled ? strings.t("no_history") : strings.t("history_disabled")
             color: Qt.darker(root.foreground, 1.4); font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall
-          }
-          Repeater {
-            model: !root.editing && !root.historyMode && root.service && root.service.config.history && root.service.config.history.enabled ? root.service.history.slice(0, 5) : []
-            delegate: Text {
-              required property var modelData
-              textFormat: Text.PlainText
-              width: body.width
-              text: String(modelData.text || "").replace(/[\r\n]+/g, " ")
-              color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; elide: Text.ElideRight
-            }
           }
           Ui.Button {
             visible: !root.editing && !root.historyMode
@@ -332,8 +324,9 @@ Ui.Panel {
             }
           }
           Ui.Button {
-            visible: !root.editing && !root.historyMode && root.service && root.service.config.history && root.service.config.history.enabled
-            text: strings.t("clear_history"); focusable: true; hasCursor: root.actionIndex === 5 && keyCatcher.activeFocus
+            id: clearHistoryButton
+            visible: !root.editing && root.historyMode && root.service && root.service.config.history && root.service.config.history.enabled
+            text: strings.t("clear_history"); focusable: true; hasCursor: root.actionIndex === 3 + 3 * (root.service ? root.service.history.length : 0) && keyCatcher.activeFocus
             onClicked: root.service.request("clear_history")
           }
           Column {
