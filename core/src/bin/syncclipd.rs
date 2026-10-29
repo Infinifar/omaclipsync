@@ -347,6 +347,16 @@ impl App {
     fn wants_watcher(&self) -> bool {
         self.config.sync.enabled && self.session.is_some()
     }
+    fn watcher_ready(&mut self, now: Instant) {
+        self.clipboard_error = false;
+        self.pull_pending = true;
+        // Re-establishing the local listener must not defeat network or
+        // authentication backoff; otherwise a flapping watcher can trigger
+        // repeated HTTP requests while the server remains unavailable.
+        if self.state != "offline" && self.state != "credentials" {
+            self.next_poll = now;
+        }
+    }
     fn ensure_watcher(&mut self, now: Instant) {
         if !self.wants_watcher() || self.watcher_active || now < self.watcher_retry {
             return;
@@ -1004,10 +1014,8 @@ fn main() {
             }
             Message::WatcherReady(generation, cancel) => {
                 if generation == app.watcher_generation && app.wants_watcher() {
-                    app.clipboard_error = false;
                     app.watcher_cancel = Some(cancel);
-                    app.pull_pending = true;
-                    app.next_poll = Instant::now();
+                    app.watcher_ready(Instant::now());
                 } else {
                     cancel.cancel();
                 }
@@ -1034,6 +1042,33 @@ fn main() {
 mod tests {
     use super::*;
     use omaclipsync_core::{Filter, FilterMode};
+    #[test]
+    fn reconnecting_local_watcher_preserves_network_and_auth_backoff() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config: dir.path().join("config.json"),
+            history: dir.path().join("history.json"),
+            logs: dir.path().join("logs"),
+        };
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
+        let now = Instant::now();
+        let retry_at = now + Duration::from_secs(60);
+        for state in ["offline", "credentials"] {
+            app.state = state;
+            app.next_poll = retry_at;
+            app.pull_pending = false;
+            app.clipboard_error = true;
+            app.watcher_ready(now);
+            assert_eq!(app.next_poll, retry_at);
+            assert!(app.pull_pending);
+            assert!(!app.clipboard_error);
+        }
+        app.state = "connected";
+        app.next_poll = retry_at;
+        app.watcher_ready(now);
+        assert_eq!(app.next_poll, now);
+    }
     #[test]
     fn signal_transitions_schedule_catchup_and_bounded_fallback() {
         let dir = tempfile::tempdir().unwrap();

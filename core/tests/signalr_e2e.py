@@ -230,17 +230,21 @@ exit 1
         threading.Thread(target=reader, daemon=True).start()
         number = 0
 
-        def status():
+        def request(method):
             nonlocal number
             number += 1
-            daemon.stdin.write(json.dumps({"id": number, "method": "status"}).encode() + b"\n")
+            daemon.stdin.write(json.dumps({"id": number, "method": method}).encode() + b"\n")
             daemon.stdin.flush()
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
                 message = messages.get(timeout=max(0.01, deadline - time.monotonic()))
                 if message.get("id") == number:
+                    assert message.get("ok") is True, f"{method} failed: {message.get('error')}"
                     return message["result"]
-            raise RuntimeError("status timed out")
+            raise RuntimeError(f"{method} timed out")
+
+        def status():
+            return request("status")
 
         def wait_for(predicate, timeout, what):
             deadline = time.monotonic() + timeout
@@ -291,9 +295,40 @@ exit 1
             with lock:
                 assert any(h == profile("fixture-after-flood")["hash"]
                            for _, h in state["polls"][before_flood:]), "latest notification lost"
+                pause_socket = state["socket"]
+                before_pause_handshakes = len(state["handshakes"])
+            assert pause_socket is not None
+            print("notification delivery and flood coalescing: PASS", flush=True)
+            paused = request("toggle")
+            assert paused.get("enabled") is False and paused.get("transport") == "off"
+            wait_for(lambda: state["socket"] is not pause_socket, 12, "WebSocket shutdown on pause")
+            before_pause = count_polls()
+            with lock:
+                state["profile"] = profile("fixture-while-paused")
+            time.sleep(3)
+            with lock:
+                assert len(state["handshakes"]) == before_pause_handshakes, "reconnected while paused"
+            assert count_polls() == before_pause, "queried server while paused"
+            resumed = request("toggle")
+            assert resumed.get("enabled") is True
+            wait_for(lambda: len(state["handshakes"]) > before_pause_handshakes, 20, "resume handshake")
+            with lock:
+                resumed_at = state["handshakes"][-1]
+            wait_for(lambda: any(t >= resumed_at and h == profile("fixture-while-paused")["hash"]
+                                 for t, h in state["polls"]), 10, "resume catch-up")
+            wait_for(lambda: status().get("transport") == "signalr", 10, "resumed SignalR state")
+            print("pause, connection shutdown, resume and catch-up: PASS", flush=True)
+            # Span the effective 30-second fallback interval while connected.
+            # Any periodic GET at that cadence would add an entry here.
+            time.sleep(1)
+            before_idle = count_polls()
+            time.sleep(32)
+            assert count_polls() == before_idle, "connected idle issued a periodic GET"
+            print("connected idle over the fallback interval: PASS", flush=True)
+            with lock:
                 state["allow_ws"] = False
                 old_socket = state["socket"]
-            print("notification delivery and flood coalescing: PASS", flush=True)
+                before_reconnect_handshakes = len(state["handshakes"])
             assert old_socket is not None
             old_socket.shutdown(socket.SHUT_RDWR)
             wait_for(lambda: status().get("transport") == "polling", 12, "fallback state")
@@ -308,7 +343,7 @@ exit 1
             with lock:
                 state["profile"] = profile("fixture-during-disconnect")
                 state["allow_ws"] = True
-            wait_for(lambda: len(state["handshakes"]) >= 2, 75, "reconnection")
+            wait_for(lambda: len(state["handshakes"]) > before_reconnect_handshakes, 75, "reconnection")
             with lock:
                 reconnected = state["handshakes"][-1]
             wait_for(lambda: any(t >= reconnected and h == profile("fixture-during-disconnect")["hash"]
@@ -318,8 +353,13 @@ exit 1
             with lock:
                 oversized_peer = state["socket"]
             assert oversized_peer is not None
-            with send_lock:
-                write_frame(oversized_peer, b'x' * (300 * 1024))
+            try:
+                with send_lock:
+                    write_frame(oversized_peer, b'x' * (300 * 1024))
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+                # The client may reject the frame before sendall finishes.
+                # Still require the server's reader to observe the disconnect.
+                pass
             wait_for(lambda: state["socket"] is not oversized_peer, 12, "oversize frame rejection")
             with lock:
                 assert state["bad_auth"] == 0

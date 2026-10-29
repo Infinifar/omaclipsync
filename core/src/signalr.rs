@@ -14,7 +14,7 @@ use std::{
     io::{self, Read},
     net::{TcpStream, ToSocketAddrs},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{SyncSender, TrySendError},
         Arc,
     },
@@ -38,6 +38,49 @@ const SERVER_TIMEOUT: Duration = Duration::from_secs(45);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const USER_AGENT_VALUE: &str = concat!("omaclipsync/", env!("CARGO_PKG_VERSION"));
 
+// DNS resolution can block indefinitely inside system libraries. A cancelled
+// generation must never make unbounded replacement network threads possible.
+// If both slots are stuck, the newest generation waits without blocking the
+// daemon, which continues its independent HTTP fallback polling.
+static NETWORK_SLOTS: Slots = Slots::new(2);
+
+struct Slots {
+    in_use: AtomicUsize,
+    limit: usize,
+}
+impl Slots {
+    const fn new(limit: usize) -> Self {
+        Self {
+            in_use: AtomicUsize::new(0),
+            limit,
+        }
+    }
+
+    fn acquire(&self, cancel: &AtomicBool) -> Option<Permit<'_>> {
+        while !stopped(cancel) {
+            let used = self.in_use.load(Ordering::Acquire);
+            if used < self.limit
+                && self
+                    .in_use
+                    .compare_exchange_weak(used, used + 1, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            {
+                let permit = Permit(self);
+                // Cancellation may have raced with acquisition.
+                return (!stopped(cancel)).then_some(permit);
+            }
+            wait(cancel, Duration::from_millis(100));
+        }
+        None
+    }
+}
+struct Permit<'a>(&'a Slots);
+impl Drop for Permit<'_> {
+    fn drop(&mut self) {
+        self.0.in_use.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
     Connected,
@@ -59,7 +102,11 @@ impl Worker {
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
-        thread::spawn(move || run(url, user, password, insecure, generation, tx, stopped));
+        thread::spawn(move || {
+            if let Some(_permit) = NETWORK_SLOTS.acquire(&stopped) {
+                run(url, user, password, insecure, generation, tx, stopped);
+            }
+        });
         Self { stop }
     }
 }
@@ -399,5 +446,56 @@ mod tests {
         let (tx, _rx) = std::sync::mpsc::sync_channel(4);
         let worker = Worker::start("invalid".into(), "u".into(), "p".into(), false, 1, tx);
         drop(worker);
+    }
+
+    #[test]
+    fn stuck_workers_limit_network_concurrency_and_waiters_can_cancel() {
+        use std::sync::mpsc;
+
+        // Hold both slots to model two old generations stalled in DNS.
+        let slots = Arc::new(Slots::new(2));
+        let running = AtomicBool::new(false);
+        let first = slots.acquire(&running).unwrap();
+        let second = slots.acquire(&running).unwrap();
+        assert_eq!(slots.in_use.load(Ordering::Acquire), 2);
+
+        // A superseded replacement must leave its wait promptly, without
+        // opening a network connection or requiring the stalled DNS to return.
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let waiter_slots = slots.clone();
+        let waiter_cancel = cancel.clone();
+        let waiter = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let acquired = waiter_slots.acquire(&waiter_cancel).is_some();
+            done_tx.send(acquired).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        cancel.store(true, Ordering::Release);
+        assert!(!done_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        waiter.join().unwrap();
+        assert_eq!(slots.in_use.load(Ordering::Acquire), 2);
+
+        // A current generation waits rather than exceeding the bound and can
+        // connect when an old generation finally returns.
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let replacement_slots = slots.clone();
+        let replacement = thread::spawn(move || {
+            let flag = AtomicBool::new(false);
+            let _permit = replacement_slots.acquire(&flag).unwrap();
+            started_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        });
+        assert!(started_rx.recv_timeout(Duration::from_millis(150)).is_err());
+        assert_eq!(slots.in_use.load(Ordering::Acquire), 2);
+        drop(first);
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(slots.in_use.load(Ordering::Acquire), 2);
+        release_tx.send(()).unwrap();
+        replacement.join().unwrap();
+        drop(second);
+        assert_eq!(slots.in_use.load(Ordering::Acquire), 0);
     }
 }
