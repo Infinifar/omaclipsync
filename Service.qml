@@ -1,7 +1,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import qs.Commons
 import qs.Commons as Commons
 
 Item {
@@ -125,7 +124,7 @@ Item {
   Component.onCompleted: launch()
   Component.onDestruction: { shuttingDown = true; restart.stop(); handshake.stop(); if (process.running) process.write('{"id":0,"method":"shutdown"}\n') }
 
-  ShellIpc {
+  Commons.ShellIpc {
     target: "io.github.infinifar.omaclipsync"
     function open(): string { return root.shell && root.shell.summon("io.github.infinifar.omaclipsync", "{}") ? "opened" : "unavailable" }
     function showIcon(): string { root.iconVisibilityRequested(true); return "queued" }

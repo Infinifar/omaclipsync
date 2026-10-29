@@ -158,6 +158,8 @@ When rolling back to a build without direction controls or sync notifications, b
 
 Requires Rust, Cargo, Clippy, `jq`, and GNU `tar`; integration tests also require Python 3 and OpenSSL. From the repository root:
 
+For QML static checks on an Omarchy machine with `qmllint` installed, run `./scripts/qmllint.sh`. It resolves the installed shell modules through a temporary directory, fails on warnings, and does not modify the installed shell or the plugin directory. Set `OMARCHY_PATH` for a nonstandard Omarchy installation or `QMLLINT` to select the executable. A clean static check does not replace desktop testing.
+
 ```sh
 cargo test --manifest-path core/Cargo.toml --locked
 cargo clippy --manifest-path core/Cargo.toml --locked --all-targets -- -D warnings

@@ -32,7 +32,7 @@ cp -R "$root/assets" "$stage/assets"
 cp -R "$root/third-party-licenses" "$stage/third-party-licenses"
 cp -R "$root/i18n" "$stage/i18n"
 cp -R "$root/core/src" "$root/core/tests" "$root/core/examples" "$root/core/Cargo.toml" "$root/core/Cargo.lock" "$stage/core/"
-cp "$root/scripts/package.sh" "$stage/scripts/"
+cp "$root/scripts/package.sh" "$root/scripts/qmllint.sh" "$stage/scripts/"
 cp "$root/tests/settings.test.js" "$root/tests/settings.gjs" "$stage/tests/"
 install -m 0755 "$binary" "$root/dist/syncclipd-linux-x86_64"
 tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C "$stage" -czf "$root/dist/omaclipsync-plugin-$version.tar.gz" .

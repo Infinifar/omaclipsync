@@ -158,6 +158,8 @@ omarchy plugin remove io.github.infinifar.omaclipsync
 
 需要 Rust、Cargo、Clippy、`jq` 和 GNU `tar`；集成测试还需要 Python 3 和 OpenSSL。在源码目录运行：
 
+在已安装 `qmllint` 的 Omarchy 机器上，可运行 `./scripts/qmllint.sh` 做 QML 静态检查。脚本通过临时目录解析已安装的 shell 模块，遇到警告时返回失败，不修改已安装的 shell 或插件目录。非标准安装可设置 `OMARCHY_PATH`；可通过 `QMLLINT` 指定可执行文件。静态检查通过不能代替桌面测试。
+
 ```sh
 cargo test --manifest-path core/Cargo.toml --locked
 cargo clippy --manifest-path core/Cargo.toml --locked --all-targets -- -D warnings

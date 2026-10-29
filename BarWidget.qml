@@ -8,6 +8,8 @@ BarWidget {
   id: root
   moduleName: "io.github.infinifar.omaclipsync"
   readonly property var barApi: bar
+  // Style.bar is declared as QtObject upstream; its tokens are resolved dynamically.
+  readonly property var barStyle: Commons.Style.bar
   readonly property var panelItem: panelLoader.item
   readonly property var service: barApi && barApi.shell && typeof barApi.shell.serviceFor === "function" ? barApi.shell.serviceFor(moduleName) : null
   readonly property bool iconShown: setting("showIcon", true) !== false
@@ -99,15 +101,15 @@ BarWidget {
     bar: root.bar
     labelVisible: false
     hasVisualContent: true
-    fixedWidth: button.vertical ? -1 : Commons.Style.bar.iconSlot
-    fixedHeight: button.vertical ? Commons.Style.bar.iconSlot : -1
+    fixedWidth: button.vertical ? -1 : root.barStyle.iconSlot
+    fixedHeight: button.vertical ? root.barStyle.iconSlot : -1
     tooltipText: strings.t("tooltip")
     foreground: root.service && !root.service.busy && (root.service.status.state === "credentials" || root.service.status.state === "clipboard_error") ? Commons.Color.urgent : (root.barApi ? root.barApi.barForeground : Commons.Color.foreground)
     dimmed: !root.service || (!root.service.busy && (root.service.status.state === "paused" || root.service.status.state === "offline"))
     onPressed: function(b) { if (b === Qt.LeftButton) root.toggle() }
     Item {
       anchors.centerIn: parent
-      width: Commons.Style.bar.iconSize
+      width: root.barStyle.iconSize
       height: width
       scale: button.pressScale
       Image {
