@@ -96,7 +96,7 @@ BarWidget {
     fixedWidth: button.vertical ? -1 : Commons.Style.bar.iconSlot
     fixedHeight: button.vertical ? Commons.Style.bar.iconSlot : -1
     tooltipText: strings.t("tooltip")
-    foreground: root.service && (root.service.busy || root.service.status.state === "connected") ? Commons.Color.accent : (root.service && (root.service.status.state === "credentials" || root.service.status.state === "clipboard_error") ? Commons.Color.urgent : (root.barApi ? root.barApi.barForeground : Commons.Color.foreground))
+    foreground: root.service && !root.service.busy && (root.service.status.state === "credentials" || root.service.status.state === "clipboard_error") ? Commons.Color.urgent : (root.barApi ? root.barApi.barForeground : Commons.Color.foreground)
     dimmed: !root.service || (!root.service.busy && (root.service.status.state === "paused" || root.service.status.state === "offline"))
     onPressed: function(b) { if (b === Qt.LeftButton) root.toggle() }
     Item {
