@@ -61,16 +61,18 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 3. 同步启用时，本机复制会自动推送，远端变更会自动接收。启动时已有的剪贴板内容不会自动推送；如有需要，可使用面板上的 **推送** 按钮。面板也提供 **接收** 和 **暂停**。
 4. 在设置中按需启用历史和过滤。选择历史条目会改变系统剪贴板，开启同步时可能被推送到服务器。粘贴会向打开历史前的应用发送 Shift+Insert；如果原窗口不可用，则仅复制并提示。
 
-历史面板可以从顶栏打开，也可绑定以下命令；快捷键由用户自行配置，插件不会自动修改键位：
+主面板和历史面板可以从顶栏打开，也可绑定以下命令；快捷键由用户自行配置，插件不会自动修改键位：
 
 ```sh
+omarchy shell io.github.infinifar.omaclipsync open
 omarchy shell io.github.infinifar.omaclipsync openHistory
 ```
 
-例如，在适用的 Omarchy Hyprland Lua 绑定配置中，可在确认快捷键未冲突后添加：
+例如，在适用的 Omarchy Hyprland Lua 绑定配置中，可先检查快捷键冲突后添加以下配置。`o.rebind` 会替换已有绑定：Omarchy 可能已将 `Super+Alt+S` 用于将窗口移至暂存区，请先核对并决定是否替换。
 
 ```lua
-o.bind("SUPER + ALT + V", "Omaclipsync history", "omarchy shell io.github.infinifar.omaclipsync openHistory")
+o.rebind("SUPER + ALT + S", "Omaclipsync panel", "omarchy shell io.github.infinifar.omaclipsync open")
+o.bind("SUPER + ALT + H", "Omaclipsync history", "omarchy shell io.github.infinifar.omaclipsync openHistory")
 ```
 
 设置中的 **显示顶栏图标** 默认开启。关闭后只隐藏图标，服务继续运行。建议隐藏前先配置历史快捷键，以便打开历史面板、返回设置并重新显示图标。请保留 Omaclipsync 在顶栏布局中的组件：移除组件或禁用插件不同于隐藏图标，可能导致面板无法打开。
