@@ -2,13 +2,17 @@
 
 English · [简体中文](README-ZH.md)
 
-<img src="assets/omaclipsync-icon.png" alt="Omaclipsync icon" width="112">
+<p align="center">
+  <img src="assets/omaclipsync-icon.svg" alt="Omaclipsync icon" width="112">
+</p>
 
 Omaclipsync is a lightweight text clipboard client plugin for Omarchy Quattro, compatible with [SyncClipboard](https://github.com/Jeric-X/SyncClipboard). Its synchronization core is written in Rust and its interface lives in the Omarchy bar.
 
 In testing, the Omaclipsync Rust daemon peaked at about **7.25 MiB** and averaged **0.022% CPU** over nine minutes. This excludes the memory used by the shared Omarchy shell.
 
-![Omaclipsync main panel](preview.png)
+<p align="center">
+  <img src="preview.png" alt="Omaclipsync main panel">
+</p>
 
 The screenshot shows the running plugin; the server address and last synchronization time have been removed for privacy.
 
