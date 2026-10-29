@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "omaclipsync",
+  "name": "Omaclipsync",
+  "version": "0.1.1",
+  "description": "Text clipboard synchronization for the Omarchy bar.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omaclipsync",
+    "description": "Text clipboard synchronization",
+    "category": "Utility",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 1,
+        "max": 30,
+        "step": 1,
+        "defaultValue": 3
+      },
+      {
+        "key": "filterEnabled",
+        "type": "boolean",
+        "label": "Enable filter",
+        "defaultValue": false
+      },
+      {
+        "key": "historyEnabled",
+        "type": "boolean",
+        "label": "Save local history",
+        "defaultValue": false
+      }
+    ]
+  },
+  "author": "Infinifar"
+}
