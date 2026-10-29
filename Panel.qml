@@ -19,6 +19,8 @@ Ui.Panel {
   property bool editing: false
   property bool historyMode: false
   property int copyRequestId: 0
+  property int favoriteRequestId: 0
+  property string favoriteError: ""
   property bool pasteAfterCopy: false
   property var pasteTarget: null
   property var pendingConfig: null
@@ -43,7 +45,7 @@ Ui.Panel {
     if (service) { service.request("get_config"); service.reloadHistory() }
     controller.show()
   }
-  function close() { editing = false; historyMode = false; actionIndex = 0; pendingPassword = ""; formError = ""; controller.hide() }
+  function close() { editing = false; historyMode = false; actionIndex = 0; pendingPassword = ""; formError = ""; favoriteError = ""; controller.hide() }
   function toggle() { if (opened) close(); else open() }
   function showHistory() { pasteTarget = ToplevelManager.activeToplevel; historyMode = true; editing = false; actionIndex = 0; if (service) service.reloadHistory(0) }
   function pasteUnavailable() { Quickshell.execDetached(["notify-send", strings.t("title"), strings.t("paste_unavailable")]) }
@@ -52,6 +54,12 @@ Ui.Panel {
     pasteAfterCopy = paste
     copyRequestId = service.request("copy_history", {hash: String(hash)}) || 0
     if (!copyRequestId) formError = "history_failed"
+  }
+  function toggleFavorite(entry) {
+    if (!service || !service.ready || favoriteRequestId) return
+    favoriteError = ""
+    favoriteRequestId = service.request("set_favorite", {hash: String(entry.hash), favorite: entry.favorite !== true}) || 0
+    if (!favoriteRequestId) favoriteError = "history_failed"
   }
   function switchPanel(direction) { return barApi && typeof barApi.switchPanelFrom === "function" ? barApi.switchPanelFrom(identity, direction) : false }
   function stateText() {
@@ -65,7 +73,8 @@ Ui.Panel {
     if (code === "keyring_failed") return strings.t("error_keyring")
     if (code === "clipboard_unavailable") return strings.t("clipboard_error")
     if (code === "sync_failed" || code === "not_configured") return strings.t("error_sync")
-    if (code === "history_failed") return strings.t("error_history")
+    if (code === "history_failed" || code === "history_not_found" || code === "history_disabled") return strings.t("error_history")
+    if (code === "favorite_limit") return strings.t("favorite_limit")
     return strings.t("error_generic")
   }
   function startEditing() {
@@ -83,8 +92,12 @@ Ui.Panel {
       else if (actionIndex === 1 && service.historyOffset > 0) { service.reloadHistory(Math.max(0, service.historyOffset - 20)); actionIndex = 0 }
       else if (actionIndex === 2 && service.historyOffset + 20 < service.historyTotal) { service.reloadHistory(service.historyOffset + 20); actionIndex = 0 }
       else if (actionIndex >= 3) {
-        let index = Math.floor((actionIndex - 3) / 2)
-        if (index < service.history.length) selectHistory(service.history[index].hash, (actionIndex - 3) % 2 === 1)
+        let index = Math.floor((actionIndex - 3) / 3)
+        let action = (actionIndex - 3) % 3
+        if (index < service.history.length) {
+          if (action === 2) toggleFavorite(service.history[index])
+          else selectHistory(service.history[index].hash, action === 1)
+        }
       }
       return
     }
@@ -104,6 +117,10 @@ Ui.Panel {
         if (!ok) { root.formError = error || "history_failed"; root.pasteAfterCopy = false; return }
         let paste = root.pasteAfterCopy; root.pasteAfterCopy = false; root.close()
         if (paste) pasteTimer.restart()
+      } else if (method === "set_favorite" && id === root.favoriteRequestId) {
+        root.favoriteRequestId = 0
+        if (!ok) root.favoriteError = error || "history_failed"
+        else { root.favoriteError = ""; root.service.reloadHistory(root.service.historyOffset) }
       } else if (method === "set_config" && id === root.settingsRequestId) {
         if (!ok) { root.pendingPassword = ""; root.pendingConfig = null; root.formError = error || "unknown"; return }
         if (root.pendingConfig && root.hostWidget && typeof root.hostWidget.reflectSettings === "function") root.hostWidget.reflectSettings(root.pendingConfig)
@@ -187,9 +204,9 @@ Ui.Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onMoveRequested: function(dx, dy) {
-        root.actionIndex = Math.max(0, Math.min(root.historyMode ? 2 + 2 * (root.service ? root.service.history.length : 0) : (root.service && root.service.config.history && root.service.config.history.enabled ? 5 : 4), root.actionIndex + (dx || dy)))
+        root.actionIndex = Math.max(0, Math.min(root.historyMode ? 2 + 3 * (root.service ? root.service.history.length : 0) : (root.service && root.service.config.history && root.service.config.history.enabled ? 5 : 4), root.actionIndex + (dx || dy)))
         if (root.historyMode && root.actionIndex >= 3) {
-          let row = historyRepeater.itemAt(Math.floor((root.actionIndex - 3) / 2))
+          let row = historyRepeater.itemAt(Math.floor((root.actionIndex - 3) / 3))
           if (row) {
             let top = row.mapToItem(body, 0, 0).y
             if (top < scroll.contentY) scroll.contentY = Math.max(0, top)
@@ -244,9 +261,9 @@ Ui.Panel {
           }
           Text {
             textFormat: Text.PlainText
-            visible: !!root.service && (root.service.status.historyError === true || root.service.status.logError === true || root.service.status.dedupeFull === true || root.service.errorCode !== "")
+            visible: !!root.service && (root.favoriteError !== "" || root.service.status.historyError === true || root.service.status.logError === true || root.service.status.dedupeFull === true || root.service.errorCode !== "")
             width: parent.width
-            text: !root.service ? "" : root.service.status.historyError ? strings.t("history_error") : root.service.status.logError ? strings.t("log_error") : root.service.status.dedupeFull ? strings.t("dedupe_full") : root.errorText(root.service.errorCode)
+            text: !root.service ? "" : root.favoriteError !== "" ? root.errorText(root.favoriteError) : root.service.status.historyError ? strings.t("history_error") : root.service.status.logError ? strings.t("log_error") : root.service.status.dedupeFull ? strings.t("dedupe_full") : root.errorText(root.service.errorCode)
             color: Commons.Color.urgent; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap
           }
           Flow {
@@ -259,6 +276,13 @@ Ui.Panel {
             Ui.Button { text: strings.t("settings"); focusable: true; hasCursor: root.actionIndex === 3 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady; onClicked: root.startEditing() }
           }
           Ui.PanelSectionHeader { visible: !root.editing; width: parent.width; text: strings.t("history"); foreground: root.foreground }
+          Text {
+            textFormat: Text.PlainText
+            visible: root.historyMode && !root.editing && root.service && root.service.config.history && root.service.config.history.enabled
+            width: parent.width
+            text: strings.t("favorite_note")
+            color: Qt.darker(root.foreground, 1.4); font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap
+          }
           Text {
             textFormat: Text.PlainText
             visible: !root.editing && (!root.service || !root.service.config.history || !root.service.config.history.enabled || root.service.history.length === 0)
@@ -299,8 +323,9 @@ Ui.Panel {
               Text { textFormat: Text.PlainText; width: parent.width; text: String(historyRow.modelData.text || "").replace(/[\r\n]+/g, " "); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; elide: Text.ElideRight }
               Flow {
                 width: parent.width; spacing: Style.space(4)
-                Ui.Button { text: strings.t("copy_entry"); focusable: true; hasCursor: root.actionIndex === 3 + historyRow.index * 2 && keyCatcher.activeFocus; onClicked: root.selectHistory(historyRow.modelData.hash, false) }
-                Ui.Button { text: strings.t("paste_entry"); focusable: true; hasCursor: root.actionIndex === 4 + historyRow.index * 2 && keyCatcher.activeFocus; onClicked: root.selectHistory(historyRow.modelData.hash, true) }
+                Ui.Button { text: strings.t("copy_entry"); focusable: true; hasCursor: root.actionIndex === 3 + historyRow.index * 3 && keyCatcher.activeFocus; onClicked: root.selectHistory(historyRow.modelData.hash, false) }
+                Ui.Button { text: strings.t("paste_entry"); focusable: true; hasCursor: root.actionIndex === 4 + historyRow.index * 3 && keyCatcher.activeFocus; onClicked: root.selectHistory(historyRow.modelData.hash, true) }
+                Ui.Button { text: strings.t(historyRow.modelData.favorite === true ? "unfavorite_entry" : "favorite_entry"); focusable: true; enabled: root.favoriteRequestId === 0; hasCursor: root.actionIndex === 5 + historyRow.index * 3 && keyCatcher.activeFocus; onClicked: root.toggleFavorite(historyRow.modelData) }
               }
             }
           }
@@ -341,7 +366,7 @@ Ui.Panel {
               Text { textFormat: Text.PlainText; anchors.verticalCenter: parent.verticalCenter; text: root.testResult === "" ? "" : (root.testResult === "test_match" || root.testResult === "test_no_match" ? strings.t(root.testResult) : root.errorText(root.testResult)); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }
             }
             Ui.Toggle { width: parent.width; label: strings.t("block_downloads"); checked: keyCatcher.blockDownloads; onClicked: keyCatcher.blockDownloads = !keyCatcher.blockDownloads }
-            Ui.Toggle { width: parent.width; label: strings.t("history_enabled"); checked: keyCatcher.historyEnabled; onClicked: keyCatcher.historyEnabled = !keyCatcher.historyEnabled }
+            Ui.Toggle { width: parent.width; label: strings.t("history_enabled"); description: strings.t("history_note"); checked: keyCatcher.historyEnabled; onClicked: keyCatcher.historyEnabled = !keyCatcher.historyEnabled }
             Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("history_limit"); from: 1; to: 1000; value: keyCatcher.historyLimit; onModified: function(v) { keyCatcher.historyLimit = v } }
             Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("dedupe"); from: 0; to: 86400; value: keyCatcher.dedupeValue; onModified: function(v) { keyCatcher.dedupeValue = v } }
             Ui.Toggle { width: parent.width; label: strings.t("insecure"); description: strings.t("insecure_note"); checked: keyCatcher.insecure; onClicked: keyCatcher.insecure = !keyCatcher.insecure }

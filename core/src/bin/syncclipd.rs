@@ -2,7 +2,7 @@
 use chrono::Utc;
 use omaclipsync_core::{
     config::{Config, ConfigError},
-    history::{Entry, History},
+    history::{Entry, History, HistoryError},
     keyring,
     logging::{Event, Level, Logger},
     protocol::{self, Request},
@@ -593,6 +593,30 @@ impl App {
                 }
                 None => Err("not_configured"),
             },
+            "set_favorite" => match self.session.as_ref() {
+                Some(s) => {
+                    let digest = request
+                        .params
+                        .get("hash")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let favorite = request.params.get("favorite").and_then(Value::as_bool);
+                    match favorite {
+                        Some(value) => s
+                            .history
+                            .set_favorite(digest, value)
+                            .map(|_| json!({}))
+                            .map_err(|e| match e {
+                                HistoryError::FavoriteLimit => "favorite_limit",
+                                HistoryError::NotFound => "history_not_found",
+                                HistoryError::Disabled => "history_disabled",
+                                _ => "history_failed",
+                            }),
+                        None => Err("invalid_request"),
+                    }
+                }
+                None => Err("not_configured"),
+            },
             "clear_history" => match self.session.as_ref() {
                 Some(s) => s
                     .history
@@ -607,12 +631,14 @@ impl App {
         (id, result, false)
     }
 }
-fn history_page(entries: Vec<Entry>, requested_offset: u64) -> Value {
+fn history_page(mut entries: Vec<Entry>, requested_offset: u64) -> Value {
+    // Stable sorting keeps chronological order inside each group before reversing.
+    entries.sort_by_key(|entry| entry.favorite);
     let total = entries.len();
     let offset = requested_offset.min(total as u64) as usize;
     let rows: Vec<_> = entries.into_iter().rev().skip(offset).take(20).map(|entry| {
         let preview: String = entry.text.chars().take(160).collect();
-        json!({"text": preview, "hash": entry.hash, "time": entry.time, "direction": entry.direction})
+        json!({"text": preview, "hash": entry.hash, "time": entry.time, "direction": entry.direction, "favorite": entry.favorite})
     }).collect();
     json!({"entries": rows, "offset": offset, "total": total})
 }
@@ -893,11 +919,14 @@ mod tests {
                     text,
                     time: n,
                     direction: omaclipsync_core::history::Direction::Upload,
+                    favorite: n == 1,
                 }
             })
             .collect();
         let page = history_page(entries.clone(), 0);
         assert_eq!(page["total"], 23);
+        assert_eq!(page["entries"][0]["hash"], entries[1].hash);
+        assert_eq!(page["entries"][0]["favorite"], true);
         assert_eq!(page["entries"].as_array().unwrap().len(), 20);
         assert_eq!(
             page["entries"][0]["text"].as_str().unwrap().chars().count(),
@@ -945,5 +974,67 @@ mod tests {
         let req = Request::parse(br#"{"id":1,"method":"pull","params":{"force":true}}"#).unwrap();
         let (_, result, _) = app.handle(req);
         assert_eq!(result.unwrap_err(), "clipboard_unavailable");
+    }
+
+    #[test]
+    fn favorite_requests_expose_errors_and_preserve_favorites_on_clear() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config: dir.path().join("config.json"),
+            history: dir.path().join("history.json"),
+            logs: dir.path().join("logs"),
+        };
+        let history = History::new(&paths.history, true, 10).unwrap();
+        for i in 0..6 {
+            history
+                .record(
+                    &format!("item-{i}"),
+                    omaclipsync_core::history::Direction::Upload,
+                    i,
+                )
+                .unwrap();
+        }
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
+        app.session = Some(Session::new(
+            Server::new(
+                "https://example.invalid",
+                "fixture".into(),
+                "fixture".into(),
+            )
+            .unwrap(),
+            WaylandClipboard,
+            Filter::new(FilterMode::Off, &[], false).unwrap(),
+            Duration::from_secs(300),
+            true,
+            32768,
+            history,
+        ));
+        for i in 0..6 {
+            let req = Request::parse(
+                serde_json::to_vec(&json!({"id":1,"method":"set_favorite",
+                "params":{"hash":omaclipsync_core::hash(&format!("item-{i}")),"favorite":true}}))
+                .unwrap()
+                .as_slice(),
+            )
+            .unwrap();
+            let (_, result, _) = app.handle(req);
+            if i < 5 {
+                assert!(result.is_ok());
+            } else {
+                assert_eq!(result.unwrap_err(), "favorite_limit");
+            }
+        }
+        let (_, result, _) =
+            app.handle(Request::parse(br#"{"id":2,"method":"clear_history"}"#).unwrap());
+        assert!(result.is_ok());
+        let (_, result, _) = app.handle(Request::parse(br#"{"id":3,"method":"history"}"#).unwrap());
+        let page = result.unwrap();
+        assert_eq!(page["total"], 5);
+        assert!(page["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["favorite"] == true));
     }
 }

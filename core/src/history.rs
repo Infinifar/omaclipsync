@@ -8,6 +8,11 @@ use std::{
 };
 
 const MAX_HISTORY_BYTES: usize = 16 * 1024 * 1024;
+const MAX_FAVORITES: usize = 5;
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
@@ -21,6 +26,8 @@ pub struct Entry {
     pub hash: String,
     pub time: u64,
     pub direction: Direction,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub favorite: bool,
 }
 #[derive(Debug)]
 pub enum HistoryError {
@@ -28,6 +35,9 @@ pub enum HistoryError {
     Json(serde_json::Error),
     Invalid,
     TooLarge,
+    Disabled,
+    NotFound,
+    FavoriteLimit,
 }
 impl From<io::Error> for HistoryError {
     fn from(e: io::Error) -> Self {
@@ -76,16 +86,15 @@ impl History {
             return Err(HistoryError::TooLarge);
         }
         let mut entries: Vec<Entry> = serde_json::from_slice(&data)?;
-        if entries.len() > 1000
+        if entries.len() > 1000 + MAX_FAVORITES
+            || entries.iter().filter(|e| e.favorite).count() > MAX_FAVORITES
             || entries.iter().any(|e| {
                 e.text.len() > MAX_TEXT_BYTES || !hash(&e.text).eq_ignore_ascii_case(&e.hash)
             })
         {
             return Err(HistoryError::Invalid);
         }
-        if entries.len() > self.limit {
-            entries.drain(..entries.len() - self.limit);
-        }
+        self.trim(&mut entries);
         Ok(entries)
     }
     pub fn record(
@@ -101,32 +110,84 @@ impl History {
             return Err(HistoryError::TooLarge);
         }
         let mut entries = self.load()?;
+        let digest = hash(text);
+        // A new occurrence of a favorite updates it instead of creating a second copy.
+        let favorite = entries
+            .iter()
+            .position(|e| e.favorite && e.hash.eq_ignore_ascii_case(&digest));
+        if let Some(index) = favorite {
+            entries.remove(index);
+        }
         entries.push(Entry {
             text: text.to_owned(),
-            hash: hash(text),
+            hash: digest,
             time: timestamp,
             direction,
+            favorite: favorite.is_some(),
         });
-        if entries.len() > self.limit {
-            entries.drain(..entries.len() - self.limit);
-        }
-        // Limit total disk and memory use as well as count. Keep the newest entries.
+        self.save(entries)
+    }
+
+    fn trim(&self, entries: &mut Vec<Entry>) {
+        let mut ordinary = entries.iter().filter(|e| !e.favorite).count();
+        entries.retain(|entry| {
+            if !entry.favorite && ordinary > self.limit {
+                ordinary -= 1;
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    fn save(&self, mut entries: Vec<Entry>) -> Result<(), HistoryError> {
+        self.trim(&mut entries);
+        // Favorites survive automatic count and size eviction.
         loop {
             let data = serde_json::to_vec(&entries)?;
             if data.len() <= MAX_HISTORY_BYTES {
                 return write_private(&self.path, &data).map_err(Into::into);
             }
-            if entries.len() <= 1 {
-                return Err(HistoryError::TooLarge);
+            match entries.iter().position(|e| !e.favorite) {
+                Some(index) if entries.len() > 1 => {
+                    entries.remove(index);
+                }
+                _ => return Err(HistoryError::TooLarge),
             }
-            entries.remove(0);
         }
+    }
+
+    pub fn set_favorite(&self, digest: &str, favorite: bool) -> Result<(), HistoryError> {
+        if !self.enabled {
+            return Err(HistoryError::Disabled);
+        }
+        if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(HistoryError::NotFound);
+        }
+        let mut entries = self.load()?;
+        let index = entries
+            .iter()
+            .rposition(|e| e.hash.eq_ignore_ascii_case(digest))
+            .ok_or(HistoryError::NotFound)?;
+        if favorite
+            && !entries[index].favorite
+            && entries.iter().filter(|e| e.favorite).count() >= MAX_FAVORITES
+        {
+            return Err(HistoryError::FavoriteLimit);
+        }
+        let mut selected = entries.remove(index);
+        selected.favorite = favorite;
+        // Identical selections represent one favorite and remain unambiguous by hash.
+        entries.retain(|e| !e.hash.eq_ignore_ascii_case(digest));
+        entries.push(selected);
+        self.save(entries)
     }
     pub fn clear(&self) -> Result<(), HistoryError> {
         if !self.enabled {
             return Ok(());
         }
-        write_private(&self.path, b"[]").map_err(Into::into)
+        let favorites = self.load()?.into_iter().filter(|e| e.favorite).collect();
+        self.save(favorites)
     }
     pub fn path(&self) -> &Path {
         &self.path
@@ -144,6 +205,10 @@ mod tests {
         let history = History::new(&path, false, 2).unwrap();
         history.record("secret", Direction::Upload, 1).unwrap();
         history.clear().unwrap();
+        assert!(matches!(
+            history.set_favorite(&hash("secret"), true),
+            Err(HistoryError::Disabled)
+        ));
         assert!(!path.exists());
         assert!(history.load().unwrap().is_empty());
     }
@@ -166,5 +231,73 @@ mod tests {
         );
         history.clear().unwrap();
         assert!(history.load().unwrap().is_empty());
+    }
+
+    #[test]
+    fn favorites_survive_eviction_clear_and_restart_with_a_five_item_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        let history = History::new(&path, true, 2).unwrap();
+        // Existing pre-favorites JSON remains readable.
+        fs::write(
+            &path,
+            serde_json::json!([{
+                "text": "old", "hash": hash("old"), "time": 0, "direction": "upload"
+            }])
+            .to_string(),
+        )
+        .unwrap();
+        assert!(!history.load().unwrap()[0].favorite);
+        history.set_favorite(&hash("old"), true).unwrap();
+        for i in 1..5 {
+            let text = format!("favorite-{i}");
+            history.record(&text, Direction::Download, i).unwrap();
+            history.set_favorite(&hash(&text), true).unwrap();
+        }
+        history.record("sixth", Direction::Upload, 10).unwrap();
+        assert!(matches!(
+            history.set_favorite(&hash("sixth"), true),
+            Err(HistoryError::FavoriteLimit)
+        ));
+        history.record("newer", Direction::Upload, 11).unwrap();
+        history.record("newest", Direction::Upload, 12).unwrap();
+        let entries = history.load().unwrap();
+        assert_eq!(entries.iter().filter(|e| e.favorite).count(), 5);
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|e| !e.favorite)
+                .map(|e| e.text.as_str())
+                .collect::<Vec<_>>(),
+            ["newer", "newest"]
+        );
+        // Recording a favorite again does not consume a new slot or lose the star.
+        history.record("old", Direction::Download, 13).unwrap();
+        assert_eq!(
+            history
+                .load()
+                .unwrap()
+                .iter()
+                .filter(|e| e.favorite)
+                .count(),
+            5
+        );
+        assert_eq!(
+            history
+                .load()
+                .unwrap()
+                .iter()
+                .filter(|e| e.text == "old")
+                .count(),
+            1
+        );
+        history.clear().unwrap();
+        let restored = History::new(&path, true, 1).unwrap().load().unwrap();
+        assert_eq!(restored.len(), 5);
+        assert!(restored.iter().all(|e| e.favorite));
+        history.set_favorite(&hash("old"), false).unwrap();
+        history.set_favorite(&hash("absent"), true).unwrap_err();
+        history.clear().unwrap();
+        assert_eq!(history.load().unwrap().len(), 4);
     }
 }
