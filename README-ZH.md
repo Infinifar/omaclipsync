@@ -2,9 +2,15 @@
 
 [English](README.md) · 简体中文
 
+<img src="assets/omaclipsync-icon.png" alt="Omaclipsync 图标" width="112">
+
 Omaclipsync 是 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard) 的 Omarchy Quattro 轻量级文本剪贴板客户端插件。同步核心由 Rust 编写，界面融入 Omarchy 顶栏，帮助使用 SyncClipboard 的多台设备同步文本。
 
 在实际测试中,Omaclipsync 的 Rust 守护进程峰值约 **7.25 MiB**，9 分钟平均 CPU 约 **0.022%**。其中不包含共享 Omarchy shell 的内存。
+
+![Omaclipsync 主面板](preview.png)
+
+截图来自实际运行的插件；服务器地址和最近同步时间已为保护隐私而遮盖。
 
 ## 特点
 
