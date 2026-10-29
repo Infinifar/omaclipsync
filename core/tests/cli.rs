@@ -11,7 +11,10 @@ fn pull_force_routes_to_existing_shell_without_shell_interpolation() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"io.github.infinifar.omaclipsync\npullForce\n");
+    assert_eq!(
+        output.stdout,
+        b"io.github.infinifar.omaclipsync\npullForce\n"
+    );
 }
 
 #[test]
