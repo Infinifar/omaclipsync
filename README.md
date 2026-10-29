@@ -85,7 +85,7 @@ omarchy shell omaclipsync status
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Dependencies retain their respective licenses.
+MIT. See [LICENSE](LICENSE). Bundled Rust dependency licenses and notices are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## English
 
