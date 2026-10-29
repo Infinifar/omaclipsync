@@ -26,6 +26,8 @@ cargo clippy --manifest-path core/Cargo.toml --locked --all-targets -- -D warnin
 gjs tests/settings.gjs Settings.js
 cargo build --manifest-path core/Cargo.toml --locked --bin syncclipd
 python3 core/tests/mocked_e2e.py "$PWD/core/target/debug/syncclipd"
+python3 core/tests/mocked_e2e.py "$PWD/core/target/debug/syncclipd" --blacklist
+python3 core/tests/auth_recovery.py "$PWD/core/target/debug/syncclipd"
 python3 core/tests/offline_recovery.py "$PWD/core/target/debug/syncclipd"
 ./scripts/package.sh
 omarchy plugin validate "$PWD"

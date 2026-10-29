@@ -30,9 +30,10 @@ def profile(text):
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: mocked_e2e.py /absolute/path/to/syncclipd")
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--blacklist"):
+        raise SystemExit("usage: mocked_e2e.py /absolute/path/to/syncclipd [--blacklist]")
     binary = Path(sys.argv[1]).resolve(strict=True)
+    blacklist = len(sys.argv) == 3
     with tempfile.TemporaryDirectory(prefix="omaclipsync-e2e-") as tmp:
         root = Path(tmp)
         key, cert = root / "key.pem", root / "cert.pem"
@@ -115,7 +116,9 @@ exit 1
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({
             "server": {"url": f"https://127.0.0.1:{server.server_port}", "user": "fixture", "insecure": True},
-            "filter": {"mode": "whitelist", "patterns": ["^fixture-local$"], "alsoBlockDownloads": True},
+            "filter": {"mode": "blacklist" if blacklist else "whitelist",
+                       "patterns": ["^fixture-(blocked|remote)$"] if blacklist else ["^fixture-local$"],
+                       "alsoBlockDownloads": True},
         }))
         config.chmod(0o600)
         env = os.environ.copy()
@@ -180,7 +183,7 @@ exit 1
             logs = b"".join(p.read_bytes() for p in (root / "state").rglob("*.jsonl"))
             assert LOCAL.encode() not in logs and b"fixture-blocked" not in logs and b"fixture-password" not in logs
             assert b'"filtered"' in logs
-            print("mocked TLS + fallback watcher + filter + upload + pause + redacted logs: PASS")
+            print(f"mocked TLS + fallback watcher + {'blacklist' if blacklist else 'whitelist'} + upload + pause + redacted logs: PASS")
         finally:
             if daemon.poll() is None:
                 daemon.kill()
