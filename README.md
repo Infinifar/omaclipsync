@@ -38,7 +38,7 @@ ln -s /usr/share/omarchy/shell "$qml_imports/qs"
 rm "$qml_imports/qs" && rmdir "$qml_imports"
 ```
 
-打包脚本生成 `dist/syncclipd-linux-x86_64` 和 `dist/omaclipsync-plugin-0.1.1.tar.gz`，不修改桌面加载目录。`.gitlab-ci.yml` 定义格式、Clippy、测试和打包；版本标签触发发布脚本，使用 CI job token 上传制品并创建 GitLab Release。该仓库的实际流水线和发布尚未验证。Git 安装源包含 x86_64 Linux 的预编译 `bin/syncclipd` 和 `bin/syncclipctl`，源码位于 `core/`；可以按上述步骤自行重建并验证。插件加载时运行仓库内的守护进程，不会在安装时下载或执行其他代码。
+打包脚本生成 `dist/syncclipd-linux-x86_64` 和 `dist/omaclipsync-plugin-0.1.1.tar.gz`，不修改桌面加载目录。`.gitlab-ci.yml` 定义格式、Clippy、测试和打包；GitLab 流水线已通过。版本标签触发的 GitLab Release 流程尚未验证；GitHub 已发布 v0.1.1 预发布包。Git 安装源包含 x86_64 Linux 的预编译 `bin/syncclipd` 和 `bin/syncclipctl`，源码位于 `core/`；可以按上述步骤自行重建并验证。插件加载时运行仓库内的守护进程，不会在安装时下载或执行其他代码。
 
 协议参照 [SyncClipboard 上游源码](https://github.com/Jeric-X/SyncClipboard)，核对版本 `fd25fd62409967a69cec842cabaec2c00adf901d`；原生监听基于 [wl-clipboard-rs 0.9.5](https://docs.rs/wl-clipboard-rs/0.9.5/wl_clipboard_rs/watch/index.html)。
 
