@@ -35,6 +35,7 @@ test:
     - python3 core/tests/mocked_e2e.py "$CARGO_TARGET_DIR/debug/syncclipd"
     - python3 core/tests/mocked_e2e.py "$CARGO_TARGET_DIR/debug/syncclipd" --blacklist
     - python3 core/tests/auth_recovery.py "$CARGO_TARGET_DIR/debug/syncclipd"
+    - python3 core/tests/signalr_e2e.py "$CARGO_TARGET_DIR/debug/syncclipd"
     - python3 core/tests/offline_recovery.py "$CARGO_TARGET_DIR/debug/syncclipd"
     - gjs tests/settings.gjs Settings.js
 

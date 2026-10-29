@@ -36,7 +36,7 @@ pub struct SyncConfig {
 impl Default for SyncConfig {
     fn default() -> Self {
         Self {
-            interval_sec: 3,
+            interval_sec: 60,
             enabled: true,
             max_inline_bytes: 32768,
         }
@@ -121,8 +121,10 @@ impl From<serde_json::Error> for ConfigError {
 }
 impl Config {
     pub fn validate(&self) -> Result<Filter, ConfigError> {
-        if !(1..=30).contains(&self.sync.interval_sec) {
-            return Err(ConfigError::Invalid("intervalSec must be 1..30"));
+        // Old configurations used 1..29 for foreground polling. The daemon
+        // clamps these values to 30 s when using them for fallback polling.
+        if !(1..=300).contains(&self.sync.interval_sec) {
+            return Err(ConfigError::Invalid("intervalSec must be 1..300"));
         }
         if self.sync.max_inline_bytes > MAX_TEXT_BYTES || self.sync.max_inline_bytes > 32768 {
             return Err(ConfigError::Invalid("maxInlineBytes must be at most 32768"));
@@ -201,7 +203,7 @@ mod tests {
         let path = dir.path().join("config.json");
         let mut cfg = Config::default();
         assert!(!cfg.history.enabled);
-        assert_eq!(cfg.sync.interval_sec, 3);
+        assert_eq!(cfg.sync.interval_sec, 60);
         cfg.server.url = "https://example.org/base".into();
         cfg.write(&path).unwrap();
         assert_eq!(

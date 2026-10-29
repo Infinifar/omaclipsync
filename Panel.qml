@@ -65,6 +65,8 @@ Ui.Panel {
   function stateText() {
     if (service && service.busy) return strings.t("syncing")
     if (service && service.status && service.status.clipboardError === true) return strings.t("clipboard_error")
+    if (syncState === "connected" && service && service.status.transport === "signalr") return strings.t("connected_realtime")
+    if (syncState === "connected" && service && service.status.transport === "polling") return strings.t("connected_fallback")
     var valid = ["connected", "connecting", "offline", "credentials", "needs_config", "config_error", "paused", "clipboard_error", "daemon_stopped", "starting"]
     return strings.t(valid.indexOf(syncState) >= 0 ? syncState : "starting")
   }
@@ -172,7 +174,7 @@ Ui.Panel {
       property bool blockDownloads: false
       property bool historyEnabled: false
       property bool insecure: false
-      property int intervalValue: 3
+      property int intervalValue: 60
       property int historyLimit: 50
       property int dedupeValue: 300
       property string userValue: userField.text
@@ -181,7 +183,7 @@ Ui.Panel {
         var c = root.service.config || ({})
         var server = c.server || ({}), sync = c.sync || ({}), filter = c.filter || ({}), history = c.history || ({}), dedupe = c.dedupe || ({})
         urlField.text = String(server.url || ""); userField.text = String(server.user || ""); passwordField.text = ""
-        intervalValue = Number(sync.intervalSec || 3); filterValue = String(filter.mode || "off")
+        intervalValue = Math.max(30, Math.min(300, Number(sync.intervalSec || 60))); filterValue = String(filter.mode || "off")
         patternsField.text = (filter.patterns || []).join("\n")
         blockDownloads = filter.alsoBlockDownloads === true; historyEnabled = history.enabled === true
         historyLimit = Number(history.limit || 50); dedupeValue = dedupe.windowSec === undefined ? 300 : Number(dedupe.windowSec)
@@ -347,7 +349,7 @@ Ui.Panel {
             Ui.TextField { id: userField; width: parent.width }
             Text { textFormat: Text.PlainText; text: strings.t("password"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }
             Ui.TextField { id: passwordField; width: parent.width; password: true; placeholderText: strings.t("password_hint") }
-            Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("interval"); from: 1; to: 30; value: keyCatcher.intervalValue; onModified: function(v) { keyCatcher.intervalValue = v } }
+            Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("interval"); from: 30; to: 300; value: keyCatcher.intervalValue; onModified: function(v) { keyCatcher.intervalValue = v } }
             Ui.Dropdown {
               width: parent.width; label: strings.t("filter"); value: keyCatcher.filterValue
               options: [{value:"off",label:strings.t("filter_off")},{value:"blacklist",label:strings.t("filter_blacklist")},{value:"whitelist",label:strings.t("filter_whitelist")}]

@@ -7,6 +7,7 @@ use omaclipsync_core::{
     logging::{Event, Level, Logger},
     protocol::{self, Request},
     session::{Outcome, Session, SyncError, WaylandClipboard},
+    signalr::{self, Event as SignalEvent},
     wayland, Error, Server,
 };
 use serde_json::{json, Value};
@@ -16,7 +17,7 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
-        mpsc::{self, SyncSender},
+        mpsc::{self, Receiver, SyncSender},
         Arc, Mutex,
     },
     thread,
@@ -26,6 +27,12 @@ use wl_clipboard_rs::watch::CancelHandle;
 
 const ID: &str = "omaclipsync";
 type LiveSession = Session<Server, WaylandClipboard>;
+struct SignalOptions {
+    url: String,
+    user: String,
+    password: String,
+    insecure: bool,
+}
 enum WatchCancel {
     Native(CancelHandle),
     Fallback(Arc<Mutex<Child>>),
@@ -84,6 +91,15 @@ struct App {
     log_error: bool,
     logger: Logger,
     next_poll: Instant,
+    next_fallback: Instant,
+    next_signal_pull: Instant,
+    pull_pending: bool,
+    signal_tx: SyncSender<(u64, SignalEvent)>,
+    signal_rx: Receiver<(u64, SignalEvent)>,
+    signal_generation: u64,
+    signal_connected: bool,
+    signal_options: Option<SignalOptions>,
+    signal_worker: Option<signalr::Worker>,
     next_config_check: Instant,
     backoff: u64,
     config_stamp: Option<(SystemTime, u64)>,
@@ -109,6 +125,7 @@ impl App {
     ) -> Self {
         let logger = Logger::new(&paths.logs);
         let now = Instant::now();
+        let (signal_tx, signal_rx) = mpsc::sync_channel(32);
         let mut app = Self {
             paths,
             config: Config::default(),
@@ -118,6 +135,15 @@ impl App {
             log_error: false,
             logger,
             next_poll: now,
+            next_fallback: now,
+            next_signal_pull: now,
+            pull_pending: false,
+            signal_tx,
+            signal_rx,
+            signal_generation: 0,
+            signal_connected: false,
+            signal_options: None,
+            signal_worker: None,
             next_config_check: now,
             backoff: 1,
             config_stamp: None,
@@ -151,6 +177,7 @@ impl App {
             Ok(c) => c,
             Err(ConfigError::Io(e)) if e.kind() == io::ErrorKind::NotFound => Config::default(),
             Err(_) => {
+                self.stop_signalr();
                 self.session = None;
                 self.state = "config_error";
                 self.log(Event::ConfigError);
@@ -161,6 +188,7 @@ impl App {
         self.apply(config);
     }
     fn apply(&mut self, config: Config) {
+        self.stop_signalr();
         let filter = match config.validate() {
             Ok(f) => f,
             Err(_) => {
@@ -206,6 +234,14 @@ impl App {
                 return;
             }
         };
+        if self.config.sync.enabled {
+            self.signal_options = Some(SignalOptions {
+                url: self.config.server.url.clone(),
+                user: self.config.server.user.clone(),
+                password: password.clone(),
+                insecure: self.config.server.insecure,
+            });
+        }
         let server = match Server::with_tls(
             &self.config.server.url,
             self.config.server.user.clone(),
@@ -214,6 +250,7 @@ impl App {
         ) {
             Ok(s) => s,
             Err(_) => {
+                self.stop_signalr();
                 self.session = None;
                 self.state = "config_error";
                 self.stop_watcher();
@@ -246,10 +283,54 @@ impl App {
         };
         self.backoff = 1;
         self.needs_check = true;
+        self.pull_pending = true;
+        self.next_fallback = Instant::now();
+        self.next_signal_pull = Instant::now();
         // Let the host complete the protocol handshake before any network request.
         self.next_poll = Instant::now() + Duration::from_secs(1);
         if !self.config.sync.enabled {
             self.stop_watcher();
+        }
+    }
+    fn stop_signalr(&mut self) {
+        self.signal_generation = self.signal_generation.wrapping_add(1);
+        self.signal_connected = false;
+        self.signal_options = None;
+        self.signal_worker = None;
+        while self.signal_rx.try_recv().is_ok() {}
+    }
+    fn fallback_interval(&self) -> Duration {
+        Duration::from_secs(self.config.sync.interval_sec.clamp(30, 300))
+    }
+    fn signal_events(&mut self, now: Instant) {
+        // Bound work per tick even if an untrusted server floods notifications.
+        for _ in 0..64 {
+            let Ok((generation, event)) = self.signal_rx.try_recv() else {
+                break;
+            };
+            if generation != self.signal_generation || !self.wants_watcher() {
+                continue;
+            }
+            match event {
+                SignalEvent::Connected => {
+                    self.signal_connected = true;
+                    self.pull_pending = true;
+                    self.next_signal_pull = now;
+                    self.next_poll = now;
+                }
+                SignalEvent::Changed => {
+                    self.pull_pending = true;
+                    if self.state != "offline" && self.state != "credentials" {
+                        self.next_poll = now;
+                    }
+                }
+                SignalEvent::Disconnected => {
+                    if self.signal_connected {
+                        self.next_fallback = now + self.fallback_interval();
+                    }
+                    self.signal_connected = false;
+                }
+            }
         }
     }
     fn stop_watcher(&mut self) {
@@ -307,7 +388,14 @@ impl App {
         });
     }
     fn status(&self) -> Value {
-        json!({"state":self.state,"enabled":self.config.sync.enabled,"url":self.config.server.url,"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
+        let transport = if !self.config.sync.enabled || self.session.is_none() {
+            "off"
+        } else if self.signal_connected {
+            "signalr"
+        } else {
+            "polling"
+        };
+        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"url":self.config.server.url,"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
     }
     fn stamp_sync(&mut self) {
         self.last_sync = Some(
@@ -341,6 +429,7 @@ impl App {
         }
     }
     fn failure(&mut self, err: SyncError) {
+        let remote_error = matches!(&err, SyncError::Remote(_));
         self.state = match err {
             SyncError::Remote(Error::Status(401 | 403)) => {
                 self.log(Event::AuthFailed);
@@ -357,6 +446,14 @@ impl App {
         };
         self.needs_check = true;
         self.next_poll = Instant::now() + Duration::from_secs(self.backoff);
+        // In fallback mode, repeated HTTP failures must not turn the slow
+        // polling cadence back into a fast retry loop. A pending local upload
+        // still uses backoff and a restored SignalR connection wakes us early.
+        if remote_error && !self.signal_connected && self.pending.is_none() {
+            self.next_poll = self
+                .next_poll
+                .max(Instant::now() + self.fallback_interval());
+        }
         self.backoff = (self.backoff * 2).min(30);
     }
     fn tick(&mut self, out: &mut impl Write) {
@@ -367,6 +464,7 @@ impl App {
                 self.reload();
             }
         }
+        self.signal_events(now);
         self.ensure_watcher(now);
         if let Ok(mut latest) = self.latest.lock() {
             if let Some((generation, text)) = latest.take() {
@@ -379,6 +477,22 @@ impl App {
             }
         }
         if !self.config.sync.enabled || self.session.is_none() || now < self.next_poll {
+            return;
+        }
+        // Start the long connection only after the host's initial handshake delay.
+        if let Some(options) = self.signal_options.take() {
+            self.signal_worker = Some(signalr::Worker::start(
+                options.url,
+                options.user,
+                options.password,
+                options.insecure,
+                self.signal_generation,
+                self.signal_tx.clone(),
+            ));
+        }
+        let fallback_due = !self.signal_connected && now >= self.next_fallback;
+        let signal_pull_due = self.pull_pending && now >= self.next_signal_pull;
+        if !self.needs_check && self.pending.is_none() && !signal_pull_due && !fallback_due {
             return;
         }
         if self.watcher_cancel.is_none() && !self.needs_check {
@@ -419,21 +533,30 @@ impl App {
                 }
             }
         }
-        let result = self.session.as_mut().unwrap().pull(false, now);
-        match result {
-            Ok(outcome) => {
-                self.note_outcome(&outcome);
-                self.log(Event::Polled);
-                if self.state != "connected" {
-                    self.log(Event::Connected);
+        if signal_pull_due || fallback_due {
+            let result = self.session.as_mut().unwrap().pull(false, now);
+            match result {
+                Ok(outcome) => {
+                    self.note_outcome(&outcome);
+                    self.log(Event::Polled);
+                    self.pull_pending = false;
+                    self.next_fallback = Instant::now() + self.fallback_interval();
+                    // Coalesce bursts while preserving the last notification.
+                    self.next_signal_pull = Instant::now() + Duration::from_millis(500);
                 }
-                self.state = "connected";
-                self.backoff = 1;
-                self.next_poll =
-                    Instant::now() + Duration::from_secs(self.config.sync.interval_sec);
+                Err(err) => {
+                    self.failure(err);
+                    let _ = protocol::event(out, "activity", &json!({"active":false}));
+                    return;
+                }
             }
-            Err(err) => self.failure(err),
         }
+        if self.state != "connected" {
+            self.log(Event::Connected);
+        }
+        self.state = "connected";
+        self.backoff = 1;
+        self.next_poll = Instant::now();
         let _ = protocol::event(out, "activity", &json!({"active":false}));
     }
     fn handle(&mut self, request: Request) -> (u64, Result<Value, &'static str>, bool) {
@@ -883,6 +1006,7 @@ fn main() {
                 if generation == app.watcher_generation && app.wants_watcher() {
                     app.clipboard_error = false;
                     app.watcher_cancel = Some(cancel);
+                    app.pull_pending = true;
                     app.next_poll = Instant::now();
                 } else {
                     cancel.cancel();
@@ -902,6 +1026,7 @@ fn main() {
         }
     }
     app.stop_watcher();
+    app.stop_signalr();
     app.log(Event::Shutdown);
 }
 
@@ -909,6 +1034,67 @@ fn main() {
 mod tests {
     use super::*;
     use omaclipsync_core::{Filter, FilterMode};
+    #[test]
+    fn signal_transitions_schedule_catchup_and_bounded_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config: dir.path().join("config.json"),
+            history: dir.path().join("history.json"),
+            logs: dir.path().join("logs"),
+        };
+        let history = History::new(&paths.history, false, 10).unwrap();
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
+        app.session = Some(Session::new(
+            Server::new(
+                "https://example.invalid",
+                "fixture".into(),
+                "fixture".into(),
+            )
+            .unwrap(),
+            WaylandClipboard,
+            Filter::new(FilterMode::Off, &[], false).unwrap(),
+            Duration::from_secs(300),
+            true,
+            32768,
+            history,
+        ));
+        app.config.sync.interval_sec = 3; // Legacy value, clamped to 30 seconds.
+        app.signal_generation = 7;
+        app.state = "connected";
+        let now = Instant::now();
+        app.signal_tx.send((7, SignalEvent::Connected)).unwrap();
+        app.signal_events(now);
+        assert!(app.signal_connected && app.pull_pending);
+        assert_eq!(app.next_poll, now);
+        assert_eq!(app.status()["transport"], "signalr");
+
+        app.pull_pending = false;
+        app.signal_tx.send((7, SignalEvent::Disconnected)).unwrap();
+        app.signal_events(now);
+        assert!(!app.signal_connected);
+        assert_eq!(app.next_fallback, now + Duration::from_secs(30));
+        assert_eq!(app.status()["transport"], "polling");
+
+        // A late notification from a canceled connection cannot revive it.
+        app.signal_tx.send((6, SignalEvent::Connected)).unwrap();
+        app.signal_events(now);
+        assert!(!app.signal_connected && !app.pull_pending);
+
+        // Real-time events must not defeat network-error backoff.
+        app.state = "offline";
+        app.next_poll = now + Duration::from_secs(8);
+        app.signal_tx.send((7, SignalEvent::Changed)).unwrap();
+        app.signal_events(now);
+        assert!(app.pull_pending);
+        assert_eq!(app.next_poll, now + Duration::from_secs(8));
+
+        app.signal_tx.send((7, SignalEvent::Connected)).unwrap();
+        app.signal_events(now);
+        assert_eq!(app.next_poll, now); // Reconnect triggers immediate catch-up.
+        app.config.sync.enabled = false;
+        assert_eq!(app.status()["transport"], "off");
+    }
     #[test]
     fn history_pagination_limits_previews_and_copy_uses_full_validated_entry() {
         let entries: Vec<_> = (0..23)

@@ -8,7 +8,7 @@ A text-only SyncClipboard client and Omarchy Quattro bar plugin. This developmen
 
 插件在 Omarchy shell 中运行，并托管一个 `syncclipd` 进程；不会启动第二个 Quickshell。同步启用时，该进程使用 Wayland data-control 事件读取普通剪贴板中的 `text/plain;charset=utf-8`，并向配置的 HTTPS SyncClipboard 服务器发送或接收文本。原生监听不可用时尝试 `wl-paste --watch`；它同样需要合成器支持 wlroots data-control；若降级时无法读取初始快照，为避免覆盖服务器，首个数据事件可能被忽略。带密码管理器敏感标记的自动监听内容会被跳过。启动时的现有剪贴板不会自动推送；需要时可手动推送。
 
-服务器使用 HTTP Basic 认证；密码通过 `secret-tool` 存入当前用户的 Secret Service 密钥环，不写入配置或日志。默认校验 TLS 证书；仅在设置中显式启用 `insecure` 时关闭校验。请求不跟随重定向，单次 HTTP 超时 10 秒，5xx 最多重试两次；断网重试间隔由 1 秒递增至 30 秒。默认 3 秒读取服务器元数据，可改为 1–30 秒，也可暂停同步。发送和接收的正文上限 10 MiB，元数据上限 256 KiB。长文本先传文件再更新元数据；已存在历史中的同一哈希会被复用。只处理 `Text`，不处理图片或文件。
+服务器使用 HTTP Basic 认证；密码通过 `secret-tool` 存入当前用户的 Secret Service 密钥环，不写入配置或日志。默认校验 TLS 证书；仅在设置中显式启用 `insecure` 时关闭校验。请求不跟随重定向，单次 HTTP 超时 10 秒，5xx 最多重试两次。通过同一 HTTPS 服务的 SignalR 协商及 WSS 长连接接收变化通知；收到通知后用现有 HTTPS 接口读取并验证内容，重连后立即补查。实时连接中断时自动回退到低频轮询，默认 60 秒，可设置为 30–300 秒；旧设置低于 30 秒时实际按 30 秒执行。SignalR 重连使用递增退避，最长间隔 60 秒；可暂停同步。SignalR 心跳间隔 15 秒，消息上限 256 KiB。HTTPS 协商遵循系统代理环境变量，WebSocket 连接当前直连；需要代理才能连接的网络可能回退到轮询。发送和接收的正文上限 10 MiB，元数据上限 256 KiB。长文本先传文件再更新元数据；已存在历史中的同一哈希会被复用。只处理 `Text`，不处理图片或文件。
 
 正则使用 Rust `regex` 语法，默认关闭；可选黑名单、白名单和接收过滤。栏设置 schema 提供间隔、过滤开关和历史开关；通过该开关启用过滤时，若当前模式为关闭则使用黑名单，模式及规则可在面板中调整。规则无法编译时拒绝启用同步。远端成功写入的同一哈希默认在 300 秒内不会重复写入本地，`pullForce` 可绕过。为限制内存，窗口内最多保留 10000 个不同哈希；达到上限时新接收的内容会等待旧记录过期。历史默认关闭；开启后保存明文到本地 JSON，默认 50 条、最多 1000 条，总文件大小上限 16 MiB，超过上限时保留较新的记录。关闭历史后不读写历史文件；已存在的记录不会自动删除。日志仅包含固定事件和时间，不包含正文或密码，按 UTC 日期保留 7 天；可设置 `logging.level`，`syncclipd --verbose` 可启用调试级事件。
 
@@ -28,6 +28,7 @@ cargo build --manifest-path core/Cargo.toml --locked --bin syncclipd
 python3 core/tests/mocked_e2e.py "$PWD/core/target/debug/syncclipd"
 python3 core/tests/mocked_e2e.py "$PWD/core/target/debug/syncclipd" --blacklist
 python3 core/tests/auth_recovery.py "$PWD/core/target/debug/syncclipd"
+python3 core/tests/signalr_e2e.py "$PWD/core/target/debug/syncclipd"
 python3 core/tests/offline_recovery.py "$PWD/core/target/debug/syncclipd"
 ./scripts/package.sh
 omarchy plugin validate "$PWD"
@@ -38,7 +39,7 @@ ln -s /usr/share/omarchy/shell "$qml_imports/qs"
 rm "$qml_imports/qs" && rmdir "$qml_imports"
 ```
 
-打包脚本生成 `dist/syncclipd-linux-x86_64` 和 `dist/omaclipsync-plugin-0.1.2.tar.gz`，不修改桌面加载目录。`.gitlab-ci.yml` 定义格式、Clippy、测试和打包；GitLab 流水线已通过。版本标签触发的 GitLab Release 流程尚未验证；GitHub 已发布 v0.1.1 预发布包。Git 安装源包含 x86_64 Linux 的预编译 `bin/syncclipd` 和 `bin/syncclipctl`，源码位于 `core/`；可以按上述步骤自行重建并验证。插件加载时运行仓库内的守护进程，不会在安装时下载或执行其他代码。
+打包脚本生成 `dist/syncclipd-linux-x86_64` 和 `dist/omaclipsync-plugin-0.1.3.tar.gz`，不修改桌面加载目录。`.gitlab-ci.yml` 定义格式、Clippy、测试和打包；版本标签触发的 GitLab Release 流程尚未验证。Git 安装源包含 x86_64 Linux 的预编译 `bin/syncclipd` 和 `bin/syncclipctl`，源码位于 `core/`；可以按上述步骤自行重建并验证。插件加载时运行仓库内的守护进程，不会在安装时下载或执行其他代码。
 
 协议参照 [SyncClipboard 上游源码](https://github.com/Jeric-X/SyncClipboard)，核对版本 `fd25fd62409967a69cec842cabaec2c00adf901d`；原生监听基于 [wl-clipboard-rs 0.9.5](https://docs.rs/wl-clipboard-rs/0.9.5/wl_clipboard_rs/watch/index.html)。
 
@@ -54,7 +55,7 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 
 ```sh
 plugin_dir="$HOME/.config/omarchy/plugins/omaclipsync"
-archive="$PWD/dist/omaclipsync-plugin-0.1.2.tar.gz"
+archive="$PWD/dist/omaclipsync-plugin-0.1.3.tar.gz"
 if [ -e "$plugin_dir" ] || [ -L "$plugin_dir" ]; then
   printf '%s\n' '目标已存在，请先备份并选择其他处理方式。' >&2
 else
@@ -91,4 +92,4 @@ MIT. See [LICENSE](LICENSE). Bundled Rust dependency licenses and notices are li
 
 ## English
 
-The daemon syncs only UTF-8 text with a user-configured HTTPS SyncClipboard server. It uses Secret Service for the password, optional local history, regex filtering, and a configurable deduplication window. Automatic monitoring skips password-manager-sensitive selections. Install with `omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable`; see the build and rollback commands above. The repository includes x86_64 Linux binaries and their Rust source. Desktop display and real clipboard upload/download have passed a smoke test; extended reliability and resource acceptance are pending.
+The daemon syncs only UTF-8 text with a user-configured HTTPS SyncClipboard server. SignalR over WebSocket notifies the daemon of changes; after disconnect it falls back to polling every 30–300 seconds (60 by default), reconnecting with backoff and checking the latest value after reconnect. SignalR negotiation honors proxy environment settings, but the WebSocket connection is direct. It uses Secret Service for the password, optional local history, regex filtering, and a configurable deduplication window. Automatic monitoring skips password-manager-sensitive selections. Install with `omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable`; see the build and rollback commands above. The repository includes x86_64 Linux binaries and their Rust source. Extended reliability and resource acceptance are pending.

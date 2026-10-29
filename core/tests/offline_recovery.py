@@ -109,7 +109,8 @@ exit 1
         config = root / 'config/omaclipsync/config.json'
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({'server': {'url': f'https://127.0.0.1:{server.server_port}',
-                                                'user': 'fixture', 'insecure': True}}))
+                                                'user': 'fixture', 'insecure': True},
+                                      'sync': {'intervalSec': 30}}))
         config.chmod(0o600)
         env = os.environ.copy()
         env.update({'PATH': str(bindir) + os.pathsep + env.get('PATH', ''),
@@ -151,7 +152,9 @@ exit 1
             with lock:
                 state['offline'] = True
             start = time.monotonic()
-            wait_for(lambda s: s['state'] == 'offline', 12)
+            # With the hub unavailable, the daemon intentionally polls at most
+            # every 30 seconds, so outage detection need not be instantaneous.
+            wait_for(lambda s: s['state'] == 'offline', 40)
             (root / 'copy-event').touch()
             print('isolated outage: offline detected; clipboard event queued', flush=True)
             while time.monotonic() - start < 60:

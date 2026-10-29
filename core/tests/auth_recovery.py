@@ -86,6 +86,7 @@ exit 1
         cfg = {
             "server": {"url": f"https://127.0.0.1:{server.server_port}",
                        "user": "fixture", "insecure": True},
+            "sync": {"intervalSec": 30},
             "logging": {"level": "info"},
         }
         config.write_text(json.dumps(cfg))
@@ -153,7 +154,7 @@ exit 1
                 state["reject"] = False
             print("HTTP 401: credentials state and retry: PASS", flush=True)
 
-            wait_for(lambda s: s["state"] == "connected" and s["watching"], 35)
+            wait_for(lambda s: s["state"] == "connected" and s["watching"], 45)
             with lock:
                 assert state["bad_auth"] == 0, "fixture Basic authentication was not sent"
             print("recovery after server accepts credentials: PASS", flush=True)

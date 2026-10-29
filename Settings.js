@@ -20,7 +20,7 @@ function changed(before, after) {
 function merge(config, changes) {
   if (!config || !config.sync || !config.filter || !config.history) return null
   var next = JSON.parse(JSON.stringify(config))
-  if (Object.prototype.hasOwnProperty.call(changes, "refreshIntervalSec")) next.sync.intervalSec = changes.refreshIntervalSec
+  if (Object.prototype.hasOwnProperty.call(changes, "refreshIntervalSec")) next.sync.intervalSec = Math.max(30, Math.min(300, Number(changes.refreshIntervalSec) || 60))
   if (Object.prototype.hasOwnProperty.call(changes, "historyEnabled")) next.history.enabled = changes.historyEnabled
   if (Object.prototype.hasOwnProperty.call(changes, "filterEnabled")) {
     if (changes.filterEnabled === false) next.filter.mode = "off"
@@ -29,6 +29,6 @@ function merge(config, changes) {
   return next
 }
 function values(config) {
-  return {refreshIntervalSec: config.sync.intervalSec, filterEnabled: config.filter.mode !== "off", historyEnabled: config.history.enabled}
+  return {refreshIntervalSec: Math.max(30, Math.min(300, Number(config.sync.intervalSec) || 60)), filterEnabled: config.filter.mode !== "off", historyEnabled: config.history.enabled}
 }
 if (typeof module !== "undefined") module.exports = {snapshot: snapshot, changed: changed, merge: merge, values: values}
