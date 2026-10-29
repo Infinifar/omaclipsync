@@ -61,17 +61,16 @@ When upgrading, the configuration, history, logs, and keyring entries keep their
 3. Local copies are pushed and remote changes received automatically while synchronization is enabled. The clipboard present at startup is not pushed automatically; use **Push** when needed. **Receive** and **Pause** are also available.
 4. Enable local history and filters if desired. Selecting a history entry changes the system clipboard and may push it to the server when synchronization is enabled. Paste sends Shift+Insert to the application active before opening history; if that window is unavailable, the item is copied and a notification is shown.
 
-Open the main panel or history from the bar, or bind these commands yourself; the plugin does not automatically change keybindings:
+Open the main panel or history from the bar, or run these commands; the plugin does not automatically change keybindings. In the history panel, select **Back** to return to the main panel:
 
 ```sh
 omarchy shell io.github.infinifar.omaclipsync open
 omarchy shell io.github.infinifar.omaclipsync openHistory
 ```
 
-For example, after checking for shortcut conflicts, add this to a compatible Omarchy Hyprland Lua binding configuration. `o.rebind` replaces an existing binding: Omarchy may already use `Super+Alt+S` to move a window to the scratchpad, so check your bindings and decide whether to replace it first.
+For example, after checking for shortcut conflicts, add this history shortcut to a compatible Omarchy Hyprland Lua binding configuration:
 
 ```lua
-o.rebind("SUPER + ALT + S", "Omaclipsync panel", "omarchy shell io.github.infinifar.omaclipsync open")
 o.bind("SUPER + ALT + H", "Omaclipsync history", "omarchy shell io.github.infinifar.omaclipsync openHistory")
 ```
 

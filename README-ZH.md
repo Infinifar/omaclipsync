@@ -61,17 +61,16 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 3. 同步启用时，本机复制会自动推送，远端变更会自动接收。启动时已有的剪贴板内容不会自动推送；如有需要，可使用面板上的 **推送** 按钮。面板也提供 **接收** 和 **暂停**。
 4. 在设置中按需启用历史和过滤。选择历史条目会改变系统剪贴板，开启同步时可能被推送到服务器。粘贴会向打开历史前的应用发送 Shift+Insert；如果原窗口不可用，则仅复制并提示。
 
-主面板和历史面板可以从顶栏打开，也可绑定以下命令；快捷键由用户自行配置，插件不会自动修改键位：
+主面板和历史面板可以从顶栏打开，也可运行以下命令；快捷键由用户自行配置，插件不会自动修改键位。在历史面板中点击 **返回** 可进入主面板：
 
 ```sh
 omarchy shell io.github.infinifar.omaclipsync open
 omarchy shell io.github.infinifar.omaclipsync openHistory
 ```
 
-例如，在适用的 Omarchy Hyprland Lua 绑定配置中，可先检查快捷键冲突后添加以下配置。`o.rebind` 会替换已有绑定：Omarchy 可能已将 `Super+Alt+S` 用于将窗口移至暂存区，请先核对并决定是否替换。
+例如，在适用的 Omarchy Hyprland Lua 绑定配置中，可先检查快捷键冲突，再添加以下历史面板快捷键：
 
 ```lua
-o.rebind("SUPER + ALT + S", "Omaclipsync panel", "omarchy shell io.github.infinifar.omaclipsync open")
 o.bind("SUPER + ALT + H", "Omaclipsync history", "omarchy shell io.github.infinifar.omaclipsync openHistory")
 ```
 
