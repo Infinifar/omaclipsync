@@ -36,7 +36,11 @@ Item {
   function notifySuccess(outcome) {
     if (!ready) return
     if (outcome !== "uploaded" && outcome !== "downloaded") return
-    Quickshell.execDetached(["notify-send", "--app-name=Omaclipsync", strings.t("title"), strings.t(outcome === "uploaded" ? "notify_pushed" : "notify_received")])
+    notify(strings.t(outcome === "uploaded" ? "notify_pushed" : "notify_received"))
+  }
+  function notify(message) {
+    const icon = decodeURIComponent(String(Qt.resolvedUrl("assets/omaclipsync-icon.svg")).replace(/^file:\/\//, ""))
+    Quickshell.execDetached(["omarchy", "notification", "send", "--app-name", "Omaclipsync", "--icon", "io.github.infinifar.omaclipsync", "--image", icon, "--urgency", "normal", strings.t("title"), message])
   }
   function showDirectionOsd(direction, enabled) {
     const keys = {push: "direction_push", receive: "direction_receive", both: "direction_both"}

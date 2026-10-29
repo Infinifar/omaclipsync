@@ -38,7 +38,16 @@ If notifications do not appear, check Omarchy's Do Not Disturb mode with `omarch
 
 ## Install
 
-**Dependencies**: an available Secret Service keyring and `secret-tool`; `notify-send` and a notification service for notifications; `wl-paste` is needed if native clipboard watching is unavailable; `wtype` is needed for automatic pasting from history. Git installation also requires Git and a trusted HTTPS server.
+**Dependencies**: an available Secret Service keyring and `secret-tool`; Omarchy's notification service and `omarchy notification send` for notifications; `wl-paste` is needed if native clipboard watching is unavailable; `wtype` is needed for automatic pasting from history. Git installation also requires Git and a trusted HTTPS server.
+
+For the Omaclipsync icon to remain visible in notification history, install the bundled icon into the user icon theme after installing the plugin:
+
+```sh
+install -Dm644 "$HOME/.config/omarchy/plugins/io.github.infinifar.omaclipsync/assets/omaclipsync-icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/io.github.infinifar.omaclipsync.svg"
+gtk-update-icon-cache -ft "$HOME/.local/share/icons/hicolor"
+```
+
+Live notifications also supply the bundled icon directly. Remove the installed icon file when uninstalling if it is no longer needed. `gtk-update-icon-cache` is provided by GTK; a desktop session may need to reload its icon theme after installation.
 
 Plugins run as unsandboxed code with your user's permissions inside Omarchy shell. Review the source and bundled x86_64 binaries before installing and enabling:
 

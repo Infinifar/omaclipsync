@@ -51,7 +51,7 @@ Ui.Panel {
   function close() { editing = false; historyMode = false; actionIndex = 0; pendingPassword = ""; formError = ""; favoriteError = ""; controller.hide() }
   function toggle() { if (opened) close(); else open() }
   function showHistory() { pasteTarget = ToplevelManager.activeToplevel; historyMode = true; editing = false; actionIndex = 0; if (service) service.reloadHistory(0) }
-  function pasteUnavailable() { Quickshell.execDetached(["notify-send", strings.t("title"), strings.t("paste_unavailable")]) }
+  function pasteUnavailable() { if (service) service.notify(strings.t("paste_unavailable")) }
   function selectHistory(hash, paste) {
     if (!service || !service.ready || copyRequestId) return
     pasteAfterCopy = paste

@@ -38,7 +38,16 @@ Omaclipsync 是 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard) 的 Om
 
 ## 安装
 
-**依赖**：可用的 Secret Service 密钥环及 `secret-tool`；通知需要 `notify-send` 和通知服务；原生剪贴板监听不可用时需要 `wl-paste`；历史条目的自动粘贴需要 `wtype`。使用 Git 安装还需要 Git 和受信任的 HTTPS 服务器。
+**依赖**：可用的 Secret Service 密钥环及 `secret-tool`；通知需要 Omarchy 通知服务和 `omarchy notification send`；原生剪贴板监听不可用时需要 `wl-paste`；历史条目的自动粘贴需要 `wtype`。使用 Git 安装还需要 Git 和受信任的 HTTPS 服务器。
+
+为了让通知历史也能显示 Omaclipsync 图标，请在安装插件后将附带的图标安装到用户图标主题：
+
+```sh
+install -Dm644 "$HOME/.config/omarchy/plugins/io.github.infinifar.omaclipsync/assets/omaclipsync-icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/io.github.infinifar.omaclipsync.svg"
+gtk-update-icon-cache -ft "$HOME/.local/share/icons/hicolor"
+```
+
+实时通知还会直接提供插件自带的图标。卸载后如果不再需要，可自行删除安装的图标文件。`gtk-update-icon-cache` 由 GTK 提供；安装后桌面会话可能需要重新加载图标主题。
 
 插件运行在未沙箱化的 Omarchy shell 中，具有当前用户权限；请先审阅源码及仓库内的 x86_64 预编译二进制。安装并启用：
 
