@@ -5,7 +5,7 @@ import "Settings.js" as Settings
 
 BarWidget {
   id: root
-  moduleName: "omaclipsync"
+  moduleName: "io.github.infinifar.omaclipsync"
   readonly property var barApi: bar
   readonly property var panelItem: panelLoader.item
   readonly property var service: barApi && barApi.shell && typeof barApi.shell.serviceFor === "function" ? barApi.shell.serviceFor(moduleName) : null

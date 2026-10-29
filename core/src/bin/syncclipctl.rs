@@ -14,7 +14,7 @@ fn usage() {
 }
 fn ipc(method: &str) -> bool {
     match Command::new("omarchy-shell")
-        .args(["omaclipsync", method])
+        .args(["io.github.infinifar.omaclipsync", method])
         .output()
     {
         Ok(output) => {

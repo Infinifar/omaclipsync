@@ -10,8 +10,8 @@ import qs.Ui as Ui
 
 Ui.Panel {
   id: root
-  moduleName: "omaclipsync"
-  ipcTarget: "omaclipsync"
+  moduleName: "io.github.infinifar.omaclipsync"
+  ipcTarget: "io.github.infinifar.omaclipsync"
   manageIpc: false
   property var anchorItem: null
   property var hostWidget: null

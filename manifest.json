@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "omaclipsync",
+  "id": "io.github.infinifar.omaclipsync",
   "name": "Omaclipsync",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Text clipboard synchronization for the Omarchy bar.",
   "kinds": [
     "service",

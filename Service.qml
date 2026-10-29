@@ -92,7 +92,7 @@ Item {
   Component.onDestruction: { shuttingDown = true; restart.stop(); handshake.stop(); if (process.running) process.write('{"id":0,"method":"shutdown"}\n') }
 
   ShellIpc {
-    target: "omaclipsync"
+    target: "io.github.infinifar.omaclipsync"
     function pull(): string { return root.pull(false) ? "queued" : "unavailable" }
     function pullForce(): string { return root.pull(true) ? "queued" : "unavailable" }
     function push(): string { return root.push() ? "queued" : "unavailable" }
@@ -100,7 +100,7 @@ Item {
     function status(): string { return JSON.stringify(root.status) }
     function openHistory(): string {
       root.historyRequested()
-      return root.shell && root.shell.summon("omaclipsync", "{}") ? "opened" : "unavailable"
+      return root.shell && root.shell.summon("io.github.infinifar.omaclipsync", "{}") ? "opened" : "unavailable"
     }
   }
   Process {

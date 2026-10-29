@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict")
 const settings = require("../Settings.js")
 const original = {sync: {intervalSec: 3}, filter: {mode: "whitelist", patterns: ["a"]}, history: {enabled: false}}
-const before = settings.snapshot({refreshIntervalSec: 3, filterEnabled: true, historyEnabled: false, id: "omaclipsync"})
+const before = settings.snapshot({refreshIntervalSec: 3, filterEnabled: true, historyEnabled: false, id: "io.github.infinifar.omaclipsync"})
 const changed = settings.changed(before, settings.snapshot({refreshIntervalSec: 60, filterEnabled: true, historyEnabled: false}))
 assert.deepEqual(changed, {refreshIntervalSec: 60})
 assert.equal(settings.merge(original, changed).sync.intervalSec, 60)
