@@ -6,7 +6,7 @@
 
 Omaclipsync 是 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard) 的 Omarchy Quattro 轻量级文本剪贴板客户端插件。同步核心由 Rust 编写，界面融入 Omarchy 顶栏，帮助使用 SyncClipboard 的多台设备同步文本。
 
-在一次本机测试中，原 SyncClipboard Desktop 进程占用 **400 多 MiB** 内存，而 Omaclipsync 的 Rust 守护进程峰值约 **7.25 MiB**，9 分钟平均 CPU 约 **0.022%**。这是单机、不同客户端的观察值，后者不包含共享 Omarchy shell 的内存；实际占用会随环境、配置和剪贴板内容变化，并非性能保证。
+在实际测试中,Omaclipsync 的 Rust 守护进程峰值约 **7.25 MiB**，9 分钟平均 CPU 约 **0.022%**。其中不包含共享 Omarchy shell 的内存。
 
 ### 特点
 
@@ -19,7 +19,7 @@ Omaclipsync 是 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard) 的 Om
 ### 使用前须知与限制
 
 - 需要自行部署 [SyncClipboard 服务端](https://github.com/Jeric-X/SyncClipboard)，或已有可访问的兼容服务。插件不包含服务端。
-- **仅同步 UTF-8 文本**，不支持同步图片或文件。Omarchy 默认提供的 [LocalSend](https://localsend.org/) 可用于手动在设备间传输图片和文件；它不是本插件的自动剪贴板同步功能。
+- **仅同步 UTF-8 文本**，不支持同步图片或文件。Omarchy 默认提供的 [LocalSend](https://localsend.org/) 已经可用于手动在设备间传输图片和文件。
 - 暂不支持多账户和 WebDAV；一次只配置一个 SyncClipboard 服务器账户。
 - 需要 Linux、Omarchy Quattro / Quickshell 和支持 data-control 协议的 Wayland 合成器。当前预编译包仅支持 **x86_64**；不支持 X11/XWayland、Windows 或 macOS。
 - 仍是开发版；多屏、长期稳定性及所有桌面环境尚未完整验收。请参阅 [验收记录](ACCEPTANCE.md)。
