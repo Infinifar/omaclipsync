@@ -33,6 +33,23 @@ pub struct SyncConfig {
     pub enabled: bool,
     pub max_inline_bytes: usize,
     pub notify_on_success: bool,
+    pub direction: SyncDirection,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncDirection {
+    Push,
+    Receive,
+    #[default]
+    Both,
+}
+impl SyncDirection {
+    pub fn can_push(self) -> bool {
+        self != Self::Receive
+    }
+    pub fn can_receive(self) -> bool {
+        self != Self::Push
+    }
 }
 impl Default for SyncConfig {
     fn default() -> Self {
@@ -41,6 +58,7 @@ impl Default for SyncConfig {
             enabled: true,
             max_inline_bytes: 32768,
             notify_on_success: true,
+            direction: SyncDirection::Both,
         }
     }
 }
@@ -209,6 +227,8 @@ mod tests {
         assert!(cfg.sync.notify_on_success);
         let old: Config = serde_json::from_str(r#"{"sync":{"enabled":true}}"#).unwrap();
         assert!(old.sync.notify_on_success);
+        assert_eq!(old.sync.direction, SyncDirection::Both);
+        assert!(serde_json::from_str::<Config>(r#"{"sync":{"direction":"invalid"}}"#).is_err());
         cfg.server.url = "https://example.org/base".into();
         cfg.write(&path).unwrap();
         assert_eq!(

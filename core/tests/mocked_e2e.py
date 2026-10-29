@@ -30,10 +30,11 @@ def profile(text):
 
 
 def main():
-    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--blacklist"):
-        raise SystemExit("usage: mocked_e2e.py /absolute/path/to/syncclipd [--blacklist]")
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] not in ("--blacklist", "--push-only", "--receive-only")):
+        raise SystemExit("usage: mocked_e2e.py /path/to/syncclipd [--blacklist|--push-only|--receive-only]")
     binary = Path(sys.argv[1]).resolve(strict=True)
-    blacklist = len(sys.argv) == 3
+    blacklist = len(sys.argv) == 3 and sys.argv[2] == "--blacklist"
+    direction = {"--push-only": "push", "--receive-only": "receive"}.get(sys.argv[2] if len(sys.argv) == 3 else "", "both")
     with tempfile.TemporaryDirectory(prefix="omaclipsync-e2e-") as tmp:
         root = Path(tmp)
         key, cert = root / "key.pem", root / "cert.pem"
@@ -41,7 +42,7 @@ def main():
                         "-keyout", str(key), "-out", str(cert), "-days", "1",
                         "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        state = {"profile": profile(REMOTE), "uploads": [], "unauthorized": 0}
+        state = {"profile": profile(REMOTE), "uploads": [], "unauthorized": 0, "reads": 0}
         lock = threading.Lock()
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -70,6 +71,7 @@ def main():
                     return self.respond(200, b"Server is running.", "text/plain")
                 if self.path == "/SyncClipboard.json":
                     with lock:
+                        state["reads"] += 1
                         data = json.dumps(state["profile"]).encode()
                     return self.respond(200, data)
                 return self.respond(404)
@@ -116,6 +118,7 @@ exit 1
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({
             "server": {"url": f"https://127.0.0.1:{server.server_port}", "user": "fixture", "insecure": True},
+            "sync": {"direction": direction},
             "filter": {"mode": "blacklist" if blacklist else "whitelist",
                        "patterns": ["^fixture-(blocked|remote)$"] if blacklist else ["^fixture-local$"],
                        "alsoBlockDownloads": True},
@@ -147,14 +150,23 @@ exit 1
                         messages.append(json.loads(line))
                 with lock:
                     uploaded = len(state["uploads"])
-                if uploaded:
+                if uploaded and direction != "receive":
+                    break
+                if direction == "receive" and time.monotonic() > deadline - 16:
                     break
             with lock:
                 uploads = list(state["uploads"])
                 unauthorized = state["unauthorized"]
+                reads = state["reads"]
             assert any(m.get("id") == 1 and m.get("result", {}).get("protocol") == 1 for m in messages)
-            assert len(uploads) == 1, f"unexpected upload count: {len(uploads)}"
-            assert uploads[0] == profile(LOCAL) | {"size": len(LOCAL)}
+            if direction == "receive":
+                assert not uploads, "receive-only mode uploaded local clipboard"
+                assert reads >= 1, "receive-only mode did not check remote clipboard"
+            else:
+                assert len(uploads) == 1, f"unexpected upload count: {len(uploads)}"
+                assert uploads[0] == profile(LOCAL) | {"size": len(LOCAL)}
+                if direction == "push":
+                    assert reads == 1, f"push-only mode performed an unexpected receive: {reads} reads"
             assert unauthorized == 0
             daemon.stdin.write(b'{"id":2,"method":"toggle"}\n')
             daemon.stdin.flush()
@@ -176,14 +188,15 @@ exit 1
             assert any(m.get("event") == "activity" and m.get("data", {}).get("active") is True for m in messages)
             assert any(m.get("event") == "activity" and m.get("data", {}).get("active") is False for m in messages)
             with lock:
-                assert len(state["uploads"]) == 1
+                assert len(state["uploads"]) == (0 if direction == "receive" else 1)
             daemon.stdin.write(b'{"id":3,"method":"shutdown"}\n')
             daemon.stdin.flush()
             assert daemon.wait(timeout=8) == 0
             logs = b"".join(p.read_bytes() for p in (root / "state").rglob("*.jsonl"))
             assert LOCAL.encode() not in logs and b"fixture-blocked" not in logs and b"fixture-password" not in logs
-            assert b'"filtered"' in logs
-            print(f"mocked TLS + fallback watcher + {'blacklist' if blacklist else 'whitelist'} + upload + pause + redacted logs: PASS")
+            if direction != "receive":
+                assert b'"filtered"' in logs
+            print(f"mocked TLS + fallback watcher + {direction} + pause + redacted logs: PASS")
         finally:
             if daemon.poll() is None:
                 daemon.kill()

@@ -1,7 +1,7 @@
 //! Shell-owned daemon. Stdout is exclusively the versioned JSON-lines protocol.
 use chrono::Utc;
 use omaclipsync_core::{
-    config::{Config, ConfigError},
+    config::{Config, ConfigError, SyncDirection},
     history::{Entry, History, HistoryError},
     keyring,
     logging::{Event, Level, Logger},
@@ -189,6 +189,12 @@ impl App {
     }
     fn apply(&mut self, config: Config) {
         self.stop_signalr();
+        if self.config.sync.direction != config.sync.direction {
+            self.pending = None;
+            if let Ok(mut latest) = self.latest.lock() {
+                *latest = None;
+            }
+        }
         let filter = match config.validate() {
             Ok(f) => f,
             Err(_) => {
@@ -234,7 +240,7 @@ impl App {
                 return;
             }
         };
-        if self.config.sync.enabled {
+        if self.config.sync.enabled && self.config.sync.direction.can_receive() {
             self.signal_options = Some(SignalOptions {
                 url: self.config.server.url.clone(),
                 user: self.config.server.user.clone(),
@@ -400,12 +406,14 @@ impl App {
     fn status(&self) -> Value {
         let transport = if !self.config.sync.enabled || self.session.is_none() {
             "off"
+        } else if !self.config.sync.direction.can_receive() {
+            "push"
         } else if self.signal_connected {
             "signalr"
         } else {
             "polling"
         };
-        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"url":self.config.server.url,"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
+        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
     }
     fn stamp_sync(&mut self) {
         self.last_sync = Some(
@@ -479,9 +487,13 @@ impl App {
         if let Ok(mut latest) = self.latest.lock() {
             if let Some((generation, text)) = latest.take() {
                 if generation == self.watcher_generation && self.wants_watcher() {
-                    self.pending = Some(text);
-                    if self.state != "offline" && self.state != "credentials" {
-                        self.next_poll = now;
+                    if self.config.sync.direction.can_push() {
+                        self.pending = Some(text);
+                        if self.state != "offline" && self.state != "credentials" {
+                            self.next_poll = now;
+                        }
+                    } else if let Some(session) = self.session.as_mut() {
+                        session.engine.clear_clipboard_suppression();
                     }
                 }
             }
@@ -500,8 +512,12 @@ impl App {
                 self.signal_tx.clone(),
             ));
         }
-        let fallback_due = !self.signal_connected && now >= self.next_fallback;
-        let signal_pull_due = self.pull_pending && now >= self.next_signal_pull;
+        let fallback_due = self.config.sync.direction.can_receive()
+            && !self.signal_connected
+            && now >= self.next_fallback;
+        let signal_pull_due = self.config.sync.direction.can_receive()
+            && self.pull_pending
+            && now >= self.next_signal_pull;
         if !self.needs_check && self.pending.is_none() && !signal_pull_due && !fallback_due {
             return;
         }
@@ -647,6 +663,38 @@ impl App {
                         Ok(self.status())
                     }
                     Err(_) => Err("config_write_failed"),
+                }
+            }
+            "set_direction" | "cycle_direction" => {
+                let direction = if request.method == "cycle_direction" {
+                    Ok(match self.config.sync.direction {
+                        SyncDirection::Push => SyncDirection::Receive,
+                        SyncDirection::Receive => SyncDirection::Both,
+                        SyncDirection::Both => SyncDirection::Push,
+                    })
+                } else {
+                    serde_json::from_value(
+                        request
+                            .params
+                            .get("direction")
+                            .cloned()
+                            .unwrap_or(Value::Null),
+                    )
+                };
+                match direction {
+                    Ok(direction) => {
+                        let mut config = self.config.clone();
+                        config.sync.direction = direction;
+                        match config.write(&self.paths.config) {
+                            Ok(()) => {
+                                self.config_stamp = self.stamp();
+                                self.apply(config);
+                                Ok(self.status())
+                            }
+                            Err(_) => Err("config_write_failed"),
+                        }
+                    }
+                    Err(_) => Err("invalid_config"),
                 }
             }
             "push" => match self.session.as_mut().map(|s| s.push_now()) {
@@ -1069,6 +1117,44 @@ fn main() {
 mod tests {
     use super::*;
     use omaclipsync_core::{Filter, FilterMode};
+
+    #[test]
+    fn direction_command_validates_and_persists_without_changing_pause() {
+        use omaclipsync_core::config::SyncDirection;
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config: dir.path().join("config.json"),
+            history: dir.path().join("history.json"),
+            logs: dir.path().join("logs"),
+        };
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
+        app.config.sync.enabled = false;
+        let request = Request::parse(
+            br#"{"id":1,"method":"set_direction","params":{"direction":"receive"}}"#,
+        )
+        .unwrap();
+        assert!(app.handle(request).1.is_ok());
+        let saved = Config::read(&app.paths.config).unwrap();
+        assert_eq!(saved.sync.direction, SyncDirection::Receive);
+        assert!(!saved.sync.enabled);
+        let bad = Request::parse(
+            br#"{"id":2,"method":"set_direction","params":{"direction":"invalid"}}"#,
+        )
+        .unwrap();
+        assert!(app.handle(bad).1.is_err());
+        assert_eq!(Config::read(&app.paths.config).unwrap(), saved);
+        for expected in ["both", "push", "receive"] {
+            let request = Request::parse(br#"{"id":3,"method":"cycle_direction"}"#).unwrap();
+            let result = app.handle(request).1.unwrap();
+            assert_eq!(result["direction"], expected);
+            assert_eq!(
+                Config::read(&app.paths.config).unwrap().sync.direction,
+                serde_json::from_value::<SyncDirection>(json!(expected)).unwrap()
+            );
+            assert!(!result["enabled"].as_bool().unwrap());
+        }
+    }
 
     #[test]
     fn success_events_only_report_actual_transfers_when_enabled() {

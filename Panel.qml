@@ -28,6 +28,7 @@ Ui.Panel {
   property int settingsRequestId: 0
   property int passwordRequestId: 0
   property int testRequestId: 0
+  property int directionRequestId: 0
   property string pendingPassword: ""
   property string pendingAccount: ""
   property string formError: ""
@@ -41,6 +42,7 @@ Ui.Panel {
   readonly property string fontFamily: barApi ? barApi.fontFamily : fontTokens.family
   readonly property string syncState: service && service.status ? String(service.status.state || "starting") : "starting"
   readonly property bool syncEnabled: service && service.status ? service.status.enabled === true : false
+  readonly property string syncDirection: service && service.config.sync ? String(service.config.sync.direction || "both") : "both"
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
   function open() {
     if (service) { service.request("get_config"); service.reloadHistory() }
@@ -63,6 +65,10 @@ Ui.Panel {
     if (!favoriteRequestId) favoriteError = "history_failed"
   }
   function switchPanel(direction) { return barApi && typeof barApi.switchPanelFrom === "function" ? barApi.switchPanelFrom(identity, direction) : false }
+  function setDirection(direction) {
+    if (!service || !service.ready || !service.configReady || directionRequestId || direction === syncDirection) return
+    directionRequestId = service.setDirection(direction) || 0
+  }
   function stateText() {
     if (service && service.busy) return strings.t("syncing")
     if (service && service.status && service.status.clipboardError === true) return strings.t("clipboard_error")
@@ -109,14 +115,20 @@ Ui.Panel {
     if (actionIndex === 0) service.push()
     else if (actionIndex === 1) service.pull(false)
     else if (actionIndex === 2) service.toggleSync()
-    else if (actionIndex === 3) showHistory()
-    else if (actionIndex === 4) startEditing()
+    else if (actionIndex === 3) setDirection("push")
+    else if (actionIndex === 4) setDirection("receive")
+    else if (actionIndex === 5) setDirection("both")
+    else if (actionIndex === 6) showHistory()
+    else if (actionIndex === 7) startEditing()
   }
   Connections {
     target: root.service
     ignoreUnknownSignals: true
+    function onReadyChanged() { if (!root.service.ready) root.directionRequestId = 0 }
     function onReplied(id, method, ok, result, error) {
-      if (method === "copy_history" && id === root.copyRequestId) {
+      if (method === "set_direction" && id === root.directionRequestId) {
+        root.directionRequestId = 0
+      } else if (method === "copy_history" && id === root.copyRequestId) {
         root.copyRequestId = 0
         if (!ok) { root.formError = error || "history_failed"; root.pasteAfterCopy = false; return }
         let paste = root.pasteAfterCopy; root.pasteAfterCopy = false; root.close()
@@ -205,7 +217,7 @@ Ui.Panel {
         var old = root.service.config || ({})
         var config = {
           server: {url: urlField.text.trim(), user: userField.text.trim(), insecure: insecure},
-          sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768, notifyOnSuccess: notifyOnSuccess},
+          sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768, notifyOnSuccess: notifyOnSuccess, direction: old.sync ? old.sync.direction || "both" : "both"},
           filter: filterConfig(), history: {enabled: historyEnabled, limit: historyLimit},
           dedupe: {windowSec: dedupeValue}, logging: old.logging || {level: "info"}
         }
@@ -216,7 +228,7 @@ Ui.Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onMoveRequested: function(dx, dy) {
-        root.actionIndex = Math.max(0, Math.min(root.historyMode ? 2 + 3 * (root.service ? root.service.history.length : 0) + (root.service && root.service.config.history && root.service.config.history.enabled ? 1 : 0) : 4, root.actionIndex + (dx || dy)))
+        root.actionIndex = Math.max(0, Math.min(root.historyMode ? 2 + 3 * (root.service ? root.service.history.length : 0) + (root.service && root.service.config.history && root.service.config.history.enabled ? 1 : 0) : 7, root.actionIndex + (dx || dy)))
         if (root.historyMode && root.actionIndex >= 3 && root.service) {
           let target = root.actionIndex === 3 + 3 * root.service.history.length ? clearHistoryButton : historyRepeater.itemAt(Math.floor((root.actionIndex - 3) / 3))
           if (target && target.visible) {
@@ -288,10 +300,17 @@ Ui.Panel {
               Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("download"); bordered: true; focusable: true; hasCursor: root.actionIndex === 1 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.pull(false) }
               Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t(root.syncEnabled ? "pause" : "resume"); bordered: true; focusable: true; hasCursor: root.actionIndex === 2 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.toggleSync() }
             }
+            Text { textFormat: Text.PlainText; text: strings.t("sync_direction"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }
             Row {
               width: parent.width; spacing: Style.space(4)
-              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("open_history"); bordered: true; focusable: true; hasCursor: root.actionIndex === 3 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.showHistory() }
-              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("settings"); bordered: true; focusable: true; hasCursor: root.actionIndex === 4 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady; onClicked: root.startEditing() }
+              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("direction_push"); bordered: true; selected: root.syncDirection === "push"; focusable: true; hasCursor: root.actionIndex === 3 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady && !root.directionRequestId; onClicked: root.setDirection("push") }
+              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("direction_receive"); bordered: true; selected: root.syncDirection === "receive"; focusable: true; hasCursor: root.actionIndex === 4 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady && !root.directionRequestId; onClicked: root.setDirection("receive") }
+              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("direction_both"); bordered: true; selected: root.syncDirection === "both"; focusable: true; hasCursor: root.actionIndex === 5 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady && !root.directionRequestId; onClicked: root.setDirection("both") }
+            }
+            Row {
+              width: parent.width; spacing: Style.space(4)
+              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("open_history"); bordered: true; focusable: true; hasCursor: root.actionIndex === 6 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.showHistory() }
+              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("settings"); bordered: true; focusable: true; hasCursor: root.actionIndex === 7 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady; onClicked: root.startEditing() }
             }
           }
           Ui.PanelSectionHeader { visible: root.historyMode && !root.editing; width: parent.width; text: strings.t("history"); foreground: root.foreground }

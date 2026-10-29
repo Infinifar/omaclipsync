@@ -21,6 +21,7 @@ The screenshot shows the running plugin; the server address and last synchroniza
 - **Real-time receive and event-driven push**: local copies use Wayland data-control events. SignalR over WebSocket notifies the client of remote changes, which it then retrieves and validates over HTTPS.
 - **Automatic recovery**: when the real-time connection is unavailable, the client falls back to polling every 60 seconds by default, configurable from 30 to 300 seconds. Older values below 30 seconds are treated as 30 seconds. Reconnection uses backoff and checks the latest state immediately after reconnecting.
 - **Desktop integration**: bar status and controls for push, receive, and pause, with live English and Chinese translations.
+- **Sync direction**: choose push only, receive only, or two-way automatic sync (the default) in the main panel. Manual push and receive remain available in every mode; pause stops automatic sync.
 - **Optional local history**: off by default; browse, copy, paste, and favorite up to five entries. Favorites stay at the top and survive clearing ordinary history. Enabled history is stored as plaintext; system clipboard history can be used instead.
 - **Sync notifications**: enabled by default and configurable in Settings. Successful pushes and receives show a notification without revealing clipboard text; unchanged and failed operations do not.
 - **Filtering and deduplication**: regex blacklist or whitelist, optional filtering on receive, and a default five-minute deduplication window. Manual forced receive is available.
@@ -76,6 +77,14 @@ For example, after checking for shortcut conflicts, add this history shortcut to
 ```lua
 o.bind("SUPER + ALT + H", "Omaclipsync history", "omarchy shell io.github.infinifar.omaclipsync openHistory")
 ```
+
+To cycle the automatic sync direction with `Super + Alt + C`, first check for conflicts and add this binding yourself:
+
+```lua
+o.bind("SUPER + ALT + C", "Cycle Omaclipsync direction", "omarchy shell io.github.infinifar.omaclipsync cycleDirection")
+```
+
+The shortcut cycles push only → receive only → two-way and shows the saved direction in Omarchy's bottom-center OSD. If automatic sync is paused, the OSD also says so. The plugin does not install or change keybindings.
 
 **Show bar icon** is enabled by default in Settings. Turning it off hides the icon while the service continues to run. Configure a history shortcut before hiding the icon so you can open history and return to Settings to show it again. Keep the Omaclipsync widget in the bar layout: removing it or disabling the plugin is different from hiding its icon and may make the panel unavailable.
 
@@ -134,7 +143,7 @@ omarchy plugin remove io.github.infinifar.omaclipsync
 
 Uninstalling the plugin does not automatically delete configuration, history, logs, or keyring entries; remove those separately if desired. Some Omarchy versions move a manually copied plugin directory to a hidden backup; check the command output. Before re-enabling the old `omaclipsync` plugin, first disable the new plugin to avoid running both clients. Before rolling back to v0.1.1, back up the history file and remove all favorites: that version cannot read history containing favorite fields.
 
-When rolling back to a build without sync notifications, back up the configuration and remove `sync.notifyOnSuccess` from the JSON configuration before starting the older daemon; older builds reject unknown configuration fields.
+When rolling back to a build without direction controls or sync notifications, back up the configuration and remove unsupported `sync.direction` and `sync.notifyOnSuccess` fields from the JSON configuration before starting the older daemon; older builds reject unknown configuration fields.
 
 ## Build from source
 

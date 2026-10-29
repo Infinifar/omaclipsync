@@ -21,6 +21,7 @@ Omaclipsync 是 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard) 的 Om
 - **实时接收，事件驱动推送**：本机复制由 Wayland data-control 事件触发；远端变化通过 SignalR / WebSocket 通知，随后通过 HTTPS 获取并校验内容。
 - **自动恢复**：实时连接中断后回退到低频轮询；默认 60 秒，可设置 30–300 秒。旧配置低于 30 秒时按 30 秒执行。后台按退避策略重连，恢复后立即检查最新内容。
 - **融入桌面**：顶栏显示连接状态，面板提供推送、接收和暂停；支持中文和英文随系统语言切换。
+- **同步方向**：主面板可选单向推送、单向接收或双向自动同步（默认）。任何模式下都可手动推送和接收；暂停会停止自动同步。
 - **可选的本地历史**：默认关闭，可浏览、复制、粘贴和收藏最多 5 条；收藏置顶，清空普通历史时保留。启用后内容以明文保存在本机，也可以使用系统剪贴板历史代替。
 - **同步通知**：默认开启，可在设置中关闭。成功推送或接收新文本时显示通知，不包含剪贴板正文；内容未变化或同步失败时不提示成功。
 - **过滤与去重**：支持正则黑名单、白名单和可选的接收过滤；默认 5 分钟内不重复写入相同的远端内容，可手动强制接收。
@@ -76,6 +77,14 @@ omarchy shell io.github.infinifar.omaclipsync openHistory
 ```lua
 o.bind("SUPER + ALT + H", "Omaclipsync history", "omarchy shell io.github.infinifar.omaclipsync openHistory")
 ```
+
+如果希望使用 `Super + Alt + C` 循环切换自动同步方向，请先检查快捷键冲突，再自行添加：
+
+```lua
+o.bind("SUPER + ALT + C", "Cycle Omaclipsync direction", "omarchy shell io.github.infinifar.omaclipsync cycleDirection")
+```
+
+快捷键按单向推送 → 单向接收 → 双向同步循环，并在屏幕下方的 Omarchy OSD 中显示保存后的方向。自动同步暂停时，OSD 也会显示暂停状态。插件不会自动添加或修改快捷键。
 
 设置中的 **显示顶栏图标** 默认开启。关闭后只隐藏图标，服务继续运行。建议隐藏前先配置历史快捷键，以便打开历史面板、返回设置并重新显示图标。请保留 Omaclipsync 在顶栏布局中的组件：移除组件或禁用插件不同于隐藏图标，可能导致面板无法打开。
 
@@ -134,7 +143,7 @@ omarchy plugin remove io.github.infinifar.omaclipsync
 
 移除插件不会自动删除配置、历史、日志或密钥环项，请按需自行清理。手动复制安装的目录在某些 Omarchy 版本中可能被移至隐藏备份；请留意命令输出。重新启用旧 `omaclipsync` 插件前，请先禁用新插件，避免两个客户端同时运行。回退到 v0.1.1 前应备份历史文件并取消全部收藏：该版本无法读取包含收藏字段的历史。
 
-回退到不支持同步通知的旧版本时，请先备份配置，并在启动旧版服务前从 JSON 配置中移除 `sync.notifyOnSuccess`；旧版会拒绝未知配置字段。
+回退到不支持方向选择或同步通知的旧版本时，请先备份配置，并在启动旧版服务前从 JSON 配置中移除不受支持的 `sync.direction` 和 `sync.notifyOnSuccess` 字段；旧版会拒绝未知配置字段。
 
 ## 从源码构建
 
