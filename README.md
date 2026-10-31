@@ -6,11 +6,11 @@ English · [简体中文](README-ZH.md)
   <img src="assets/omaclipsync-icon.svg" alt="Omaclipsync icon" width="112">
 </p>
 
-Omaclipsync is a lightweight text clipboard client plugin for Omarchy Quattro, using the dedicated [RustClipSync V1 server](https://github.com/Infinifar/rustclipsync-server) protocol. Its synchronization core is written in Rust and its interface lives in the Omarchy bar.
+Omaclipsync is a lightweight text clipboard client plugin for Omarchy Quattro, using the dedicated [RustClipSync server](https://github.com/Infinifar/rustclipsync-server) protocol. Its synchronization core is written in Rust and its interface lives in the Omarchy bar.
 
-For Android, use the [Fcitx5 Android input method](https://github.com/Infinifar/fcitx5-android-bibi-keyboard) with its built-in V1 synchronization module. All three components are under development; use V1-compatible versions together.
+For Android, use the [Fcitx5 Android input method](https://github.com/Infinifar/fcitx5-android-bibi-keyboard) with its built-in RustClipSync synchronization module.
 
-Measurements from the older protocol do not describe V1; V1 desktop resource usage still needs separate measurement.
+Measurements from the older protocol do not describe the current implementation; desktop resource usage still needs separate measurement.
 
 <p align="center">
   <img src="preview.png" alt="Omaclipsync main panel">
@@ -33,7 +33,7 @@ If notifications do not appear, check Omarchy's Do Not Disturb mode with `omarch
 
 ## Requirements and limitations
 
-- Deploy a [RustClipSync V1 server](https://github.com/Infinifar/rustclipsync-server). This plugin does not include a server. The Android client is the [Fcitx5 Android V1 development build](https://github.com/Infinifar/fcitx5-android-bibi-keyboard).
+- Deploy a [RustClipSync server](https://github.com/Infinifar/rustclipsync-server). This plugin does not include a server. The Android client is the [Fcitx5 Android input method](https://github.com/Infinifar/fcitx5-android-bibi-keyboard).
 - **UTF-8 text only**: image and file synchronization are not supported. [LocalSend](https://localsend.org/), included in standard Omarchy installations, can already transfer images and files manually between devices.
 - Multiple accounts and WebDAV are not currently supported; configure one server account at a time.
 - Requires Linux, Omarchy Quattro / Quickshell, and a Wayland compositor with data-control support. The bundled binaries target **x86_64** only. X11/XWayland, Windows, and macOS are not supported.
@@ -41,7 +41,7 @@ If notifications do not appear, check Omarchy's Do Not Disturb mode with `omarch
 
 ## Install
 
-**Dependencies**: an available Secret Service keyring and `secret-tool`; Omarchy's notification service and `omarchy notification send` for notifications; native Wayland data-control watching for V1 synchronization; `wtype` for automatic pasting from history. Git installation also requires Git and a trusted HTTPS server.
+**Dependencies**: an available Secret Service keyring and `secret-tool`; Omarchy's notification service and `omarchy notification send` for notifications; native Wayland data-control watching for synchronization; `wtype` for automatic pasting from history. Git installation also requires Git and a trusted HTTPS server.
 
 For the Omaclipsync icon to remain visible in notification history, install the bundled icon into the user icon theme after installing the plugin:
 
@@ -72,9 +72,9 @@ The packaging command overwrites outputs of the same version in `dist/`; back up
 omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 ```
 
-### Manually deploying and rolling back the V1 development package
+### Manually deploying and rolling back the plugin package
 
-Run these commands yourself only once the V1 server and other clients are ready. They disable the current plugin, move its directory into a backup under your user data directory, and load the package. The manually installed plugin will not be Git-managed. Configuration, history, and keyring entries are outside the plugin directory and need their own backups. Replace `package` with the absolute path to the verified V1 package:
+Run these commands yourself only once the server and other clients are ready. They disable the current plugin, move its directory into a backup under your user data directory, and load the package. The manually installed plugin will not be Git-managed. Configuration, history, and keyring entries are outside the plugin directory and need their own backups. Replace `package` with the absolute path to the verified plugin package:
 
 ```sh
 (
@@ -82,7 +82,7 @@ Run these commands yourself only once the V1 server and other clients are ready.
   plugin_id='io.github.infinifar.omaclipsync'
   load_root="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
   backup_root="${XDG_DATA_HOME:-$HOME/.local/share}/omaclipsync-backups"
-  package='/absolute/path/to/omaclipsync-plugin-v1-development.tar.gz'
+  package='/absolute/path/to/omaclipsync-plugin.tar.gz'
   test -f "$package" && test -d "$load_root/$plugin_id"
   mkdir -p "$backup_root"
   backup=$(mktemp -d "$backup_root/$plugin_id.XXXXXXXX")
@@ -97,7 +97,7 @@ Run these commands yourself only once the V1 server and other clients are ready.
 )
 ```
 
-Keep the printed backup path. If validation or enabling fails, retain the backup and inspect the error; do not move it again blindly. To roll back, disable V1, move the current plugin directory to a new backup directory, move the saved `previous` directory back to the original load location, then run `omarchy-shell shell rescanPlugins` and `omarchy plugin enable io.github.infinifar.omaclipsync`. The server must also be rolled back to an image and database backup compatible with the old plugin.
+Keep the printed backup path. If validation or enabling fails, retain the backup and inspect the error; do not move it again blindly. To roll back, disable the plugin, move the current plugin directory to a new backup directory, move the saved `previous` directory back to the original load location, then run `omarchy-shell shell rescanPlugins` and `omarchy plugin enable io.github.infinifar.omaclipsync`. The server must also be rolled back to an image and database backup compatible with the old plugin.
 
 The plugin ID is `io.github.infinifar.omaclipsync`. The repository includes `bin/syncclipd` and `bin/syncclipctl`. Enabling it runs the bundled daemon; installation does not download a separate binary or start a second Quickshell.
 
@@ -161,13 +161,13 @@ omarchy shell io.github.infinifar.omaclipsync pull
 omarchy shell io.github.infinifar.omaclipsync toggle
 ```
 
-`queued` means that a command was queued, not that synchronization succeeded. The bundled `bin/syncclipctl` connects to the existing shell and supports `status`, `push`, `pull`, `toggle`, `watch`, and `config`. V1 does not force replay of processed messages.
+`queued` means that a command was queued, not that synchronization succeeded. The bundled `bin/syncclipctl` connects to the existing shell and supports `status`, `push`, `pull`, `toggle`, `watch`, and `config`. The plugin does not force replay of processed messages.
 
 ## Permissions, network, and data
 
 The plugin runs with the current user's permissions, reads and writes the regular Wayland clipboard, and exchanges text with the **user-configured HTTPS server**. TLS certificate validation is on by default and can only be disabled by explicitly enabling `insecure`. Requests do not follow redirects. HTTPS long polling waits up to 25 seconds and reconnects with backoff.
 
-Text is limited to 10 MiB and metadata to 16 KiB. Automatic and manual pushes and receives skip marked sensitive content by default. If enabled, received text retains its sensitivity marker and can be saved as plaintext if local history is enabled. The protection relies on applications marking their clipboard offers; unmarked secrets cannot be identified. Changing this option discards queued clipboard events and restarts the listener. V1 pauses if native listening is unavailable so its own writes cannot create a loop.
+Text is limited to 10 MiB and metadata to 16 KiB. Automatic and manual pushes and receives skip marked sensitive content by default. If enabled, received text retains its sensitivity marker and can be saved as plaintext if local history is enabled. The protection relies on applications marking their clipboard offers; unmarked secrets cannot be identified. Changing this option discards queued clipboard events and restarts the listener. The plugin pauses if native listening is unavailable so its own writes cannot create a loop.
 
 When sensitive synchronization is enabled, received text is written to the system Wayland clipboard with a password-manager sensitivity marker. Clipboard history managers that respect this marker may omit it from their history; the history list is separate from the system clipboard itself. The plugin's own history is off by default and may store sensitive text in plaintext when enabled. Actual display and paste behavior depends on the desktop environment and application.
 

@@ -6,11 +6,11 @@
   <img src="assets/omaclipsync-icon.svg" alt="Omaclipsync 图标" width="112">
 </p>
 
-Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使用 [RustClipSync V1 服务端](https://github.com/Infinifar/rustclipsync-server)的专用协议。同步核心由 Rust 编写，界面融入 Omarchy 顶栏。
+Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使用 [RustClipSync 服务端](https://github.com/Infinifar/rustclipsync-server)的专用协议。同步核心由 Rust 编写，界面融入 Omarchy 顶栏。
 
-手机端可使用内置 V1 同步模块的 [Fcitx5 Android 输入法](https://github.com/Infinifar/fcitx5-android-bibi-keyboard)，配合该服务端与桌面插件同步。三端均处于开发阶段，安装时请确认使用支持 V1 的版本。
+手机端可使用内置 RustClipSync 同步模块的 [Fcitx5 Android 输入法](https://github.com/Infinifar/fcitx5-android-bibi-keyboard)，配合该服务端与桌面插件同步。
 
-旧协议版本的历史性能数据不适用于 V1；V1 的实际桌面资源占用尚需单独测量。
+旧协议版本的历史性能数据不适用于当前实现；实际桌面资源占用尚需单独测量。
 
 <p align="center">
   <img src="preview.png" alt="Omaclipsync 主面板">
@@ -33,7 +33,7 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 
 ## 使用前须知与限制
 
-- 需要自行部署 [RustClipSync V1 服务端](https://github.com/Infinifar/rustclipsync-server)。插件不包含服务端；手机端使用 [Fcitx5 Android 输入法 V1 开发版](https://github.com/Infinifar/fcitx5-android-bibi-keyboard)。
+- 需要自行部署 [RustClipSync 服务端](https://github.com/Infinifar/rustclipsync-server)。插件不包含服务端；手机端使用 [Fcitx5 Android 输入法](https://github.com/Infinifar/fcitx5-android-bibi-keyboard)。
 - **仅同步 UTF-8 文本**，不支持同步图片或文件。Omarchy 默认提供的 [LocalSend](https://localsend.org/) 已经可用于手动在设备间传输图片和文件。
 - 暂不支持多账户和 WebDAV；一次只配置一个服务端账户。
 - 需要 Linux、Omarchy Quattro / Quickshell 和支持 data-control 协议的 Wayland 合成器。当前预编译包仅支持 **x86_64**；不支持 X11/XWayland、Windows 或 macOS。
@@ -41,7 +41,7 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 
 ## 安装
 
-**依赖**：可用的 Secret Service 密钥环及 `secret-tool`；通知需要 Omarchy 通知服务和 `omarchy notification send`；V1 自动同步需要原生 data-control 监听；历史条目的自动粘贴需要 `wtype`。使用 Git 安装还需要 Git 和受信任的 HTTPS 服务器。
+**依赖**：可用的 Secret Service 密钥环及 `secret-tool`；通知需要 Omarchy 通知服务和 `omarchy notification send`；自动同步需要原生 data-control 监听；历史条目的自动粘贴需要 `wtype`。使用 Git 安装还需要 Git 和受信任的 HTTPS 服务器。
 
 为了让通知历史也能显示 Omaclipsync 图标，请在安装插件后将附带的图标安装到用户图标主题：
 
@@ -72,9 +72,9 @@ omarchy plugin disable omaclipsync
 omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 ```
 
-### 手动部署与回退 V1 开发包
+### 手动部署与回退插件安装包
 
-仅在 V1 服务端和其他客户端已准备好后执行。下面的命令由用户执行，会停止当前插件，将其目录移到用户数据目录中的备份位置，再加载新包；手动部署后的插件不再是 Git 管理的安装。配置、历史和密钥环位于插件目录之外，需按自己的备份策略另行保护。把 `PACKAGE` 改为已验证的 V1 安装包绝对路径：
+仅在 服务端和其他客户端已准备好后执行。下面的命令由用户执行，会停止当前插件，将其目录移到用户数据目录中的备份位置，再加载新包；手动部署后的插件不再是 Git 管理的安装。配置、历史和密钥环位于插件目录之外，需按自己的备份策略另行保护。把 `PACKAGE` 改为已验证的插件安装包绝对路径：
 
 ```sh
 (
@@ -82,7 +82,7 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
   plugin_id='io.github.infinifar.omaclipsync'
   load_root="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
   backup_root="${XDG_DATA_HOME:-$HOME/.local/share}/omaclipsync-backups"
-  package='/absolute/path/to/omaclipsync-plugin-v1-development.tar.gz'
+  package='/absolute/path/to/omaclipsync-plugin.tar.gz'
   test -f "$package" && test -d "$load_root/$plugin_id"
   mkdir -p "$backup_root"
   backup=$(mktemp -d "$backup_root/$plugin_id.XXXXXXXX")
@@ -97,7 +97,7 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 )
 ```
 
-请记下输出的备份路径。如果验证或启用失败，保留该备份并检查错误；不要重复移动备份。回退时先禁用 V1，将当前插件目录移到一个新的备份目录，然后把记下的 `previous` 目录移回原加载位置，重新运行 `omarchy-shell shell rescanPlugins` 和 `omarchy plugin enable io.github.infinifar.omaclipsync`。服务端也必须回退为与旧插件兼容的镜像及数据库备份。
+请记下输出的备份路径。如果验证或启用失败，保留该备份并检查错误；不要重复移动备份。回退时先禁用插件，将当前插件目录移到一个新的备份目录，然后把记下的 `previous` 目录移回原加载位置，重新运行 `omarchy-shell shell rescanPlugins` 和 `omarchy plugin enable io.github.infinifar.omaclipsync`。服务端也必须回退为与旧插件兼容的镜像及数据库备份。
 
 插件 ID 为 `io.github.infinifar.omaclipsync`。安装源包含 `bin/syncclipd` 和 `bin/syncclipctl`；启用后会运行守护进程，安装时不另行下载二进制或启动第二个 Quickshell。
 
@@ -105,7 +105,7 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 
 ## 配置和使用
 
-1. 在顶栏打开 Omaclipsync，进入 **设置**，填写 V1 服务端的 HTTPS 地址、用户名和密码并保存。URL 必须指向服务根地址，包括部署时配置的路径前缀（如有）。
+1. 在顶栏打开 Omaclipsync，进入 **设置**，填写 服务端的 HTTPS 地址、用户名和密码并保存。URL 必须指向服务根地址，包括部署时配置的路径前缀（如有）。
 2. 密码保存到系统 Secret Service 密钥环，不写入配置文件；留空会保留当前账户已有密码。密钥环锁定时请先解锁。
 3. 首次配对从服务端当前版本开始，不覆盖旧的本地内容；启动时已有的本机剪贴板也不会自动推送。离线期间只追上最新内容，本地待发送内容与远端冲突时不会静默覆盖；确认后点击 **推送** 可选择当前本地剪贴板。面板也提供 **接收** 和 **暂停**。
 4. 在设置中按需启用历史和过滤。选择历史条目会改变系统剪贴板，开启同步时可能被推送到服务器。粘贴会向打开历史前的应用发送 Shift+Insert；如果原窗口不可用，则仅复制并提示。
@@ -161,13 +161,13 @@ omarchy shell io.github.infinifar.omaclipsync pull
 omarchy shell io.github.infinifar.omaclipsync toggle
 ```
 
-`queued` 表示命令已排队，不代表同步已经成功。`bin/syncclipctl` 也可连接现有 shell，支持 `status`、`push`、`pull`、`toggle`、`watch` 和 `config`。V1 不提供重复写入已处理消息的强制接收。
+`queued` 表示命令已排队，不代表同步已经成功。`bin/syncclipctl` 也可连接现有 shell，支持 `status`、`push`、`pull`、`toggle`、`watch` 和 `config`。插件不提供重复写入已处理消息的强制接收。
 
 ## 权限、网络与数据
 
 插件以当前用户权限读取和写入普通 Wayland 剪贴板，向**用户配置的 HTTPS 服务**发送或接收文本。默认校验证书，只有在设置中显式开启 `insecure` 才会关闭校验；请求不跟随重定向。通知通过最多 25 秒的 HTTPS 长轮询实现，断线后按退避间隔重试。
 
-同步内容上限为 10 MiB，元数据上限为 16 KiB。自动和手动推送以及接收默认跳过密码管理器标记的敏感内容；开启后接收时保留敏感标记，并可能在启用本地历史时以明文保存。检测依赖复制来源提供敏感标记，无法识别未标记的秘密内容。更改开关时会丢弃等待处理的剪贴板事件并重启监听。V1 无法使用原生监听时会暂停同步，避免无法识别自身写入造成循环。
+同步内容上限为 10 MiB，元数据上限为 16 KiB。自动和手动推送以及接收默认跳过密码管理器标记的敏感内容；开启后接收时保留敏感标记，并可能在启用本地历史时以明文保存。检测依赖复制来源提供敏感标记，无法识别未标记的秘密内容。更改开关时会丢弃等待处理的剪贴板事件并重启监听。插件无法使用原生监听时会暂停同步，避免无法识别自身写入造成循环。
 
 开启敏感内容同步后，接收内容会写入系统 Wayland 剪贴板，并附带密码管理器敏感标记。支持该标记的系统剪贴板历史管理器可能不显示或保存它；这与系统剪贴板本身是不同的功能。插件自带历史默认关闭，开启后可能明文保存敏感内容。实际显示和粘贴行为取决于桌面环境和应用。
 
