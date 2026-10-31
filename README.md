@@ -37,7 +37,7 @@ If notifications do not appear, check Omarchy's Do Not Disturb mode with `omarch
 - **UTF-8 text only**: image and file synchronization are not supported. [LocalSend](https://localsend.org/), included in standard Omarchy installations, can already transfer images and files manually between devices.
 - Multiple accounts and WebDAV are not currently supported; configure one server account at a time.
 - Requires Linux, Omarchy Quattro / Quickshell, and a Wayland compositor with data-control support. The bundled binaries target **x86_64** only. X11/XWayland, Windows, and macOS are not supported.
-- This is a development release; multi-monitor behavior, long-term stability, and all desktop environments have not been fully validated. See [acceptance notes](ACCEPTANCE.md).
+- Multi-monitor behavior, long-term stability, and all desktop environments have not been fully validated. See [acceptance notes](ACCEPTANCE.md).
 
 ## Install
 
