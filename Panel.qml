@@ -17,6 +17,7 @@ Ui.Panel {
   property var service: null
   property bool editing: false
   property bool historyMode: false
+  property bool repairConfirm: false
   property int copyRequestId: 0
   property int favoriteRequestId: 0
   property string favoriteError: ""
@@ -47,7 +48,7 @@ Ui.Panel {
     if (service) { service.request("get_config"); service.reloadHistory() }
     controller.show()
   }
-  function close() { editing = false; historyMode = false; actionIndex = 0; pendingPassword = ""; formError = ""; favoriteError = ""; controller.hide() }
+  function close() { editing = false; historyMode = false; repairConfirm = false; actionIndex = 0; pendingPassword = ""; formError = ""; favoriteError = ""; controller.hide() }
   function toggle() { if (opened) close(); else open() }
   function showHistory() { pasteTarget = ToplevelManager.activeToplevel; historyMode = true; editing = false; actionIndex = 0; if (service) service.reloadHistory(0) }
   function pasteUnavailable() { if (service) service.notify(strings.t("paste_unavailable")) }
@@ -71,15 +72,16 @@ Ui.Panel {
   function stateText() {
     if (service && service.busy) return strings.t("syncing")
     if (service && service.status && service.status.clipboardError === true) return strings.t("clipboard_error")
-    if (syncState === "connected" && service && service.status.transport === "signalr") return strings.t("connected_realtime")
+    if (syncState === "connected" && service && (service.status.transport === "signalr" || service.status.transport === "v1")) return strings.t("connected_realtime")
     if (syncState === "connected" && service && service.status.transport === "polling") return strings.t("connected_fallback")
-    var valid = ["connected", "connecting", "offline", "credentials", "needs_config", "config_error", "paused", "clipboard_error", "daemon_stopped", "starting"]
+    var valid = ["connected", "connecting", "offline", "credentials", "needs_config", "config_error", "paused", "clipboard_error", "daemon_stopped", "starting", "conflict", "expired", "re_pair", "storage_error"]
     return strings.t(valid.indexOf(syncState) >= 0 ? syncState : "starting")
   }
   function errorText(code) {
     if (code === "invalid_config" || code === "config_write_failed" || code === "invalid_filter") return strings.t("error_config")
     if (code === "keyring_failed") return strings.t("error_keyring")
     if (code === "clipboard_unavailable") return strings.t("clipboard_error")
+    if (code === "sensitive_blocked") return strings.t("sensitive_blocked")
     if (code === "sync_failed" || code === "not_configured") return strings.t("error_sync")
     if (code === "history_failed" || code === "history_not_found" || code === "history_disabled") return strings.t("error_history")
     if (code === "favorite_limit") return strings.t("favorite_limit")
@@ -191,6 +193,7 @@ Ui.Panel {
       property bool blockDownloads: false
       property bool historyEnabled: false
       property bool notifyOnSuccess: true
+      property bool allowSensitive: false
       property bool showIcon: true
       property bool insecure: false
       property int intervalValue: 60
@@ -206,6 +209,7 @@ Ui.Panel {
         patternsField.text = (filter.patterns || []).join("\n")
         blockDownloads = filter.alsoBlockDownloads === true; historyEnabled = history.enabled === true
         notifyOnSuccess = sync.notifyOnSuccess !== false
+        allowSensitive = sync.allowSensitive === true
         showIcon = root.hostWidget ? root.hostWidget.iconShown : true
         historyLimit = Number(history.limit || 50); dedupeValue = dedupe.windowSec === undefined ? 300 : Number(dedupe.windowSec)
         insecure = server.insecure === true; testField.text = ""
@@ -215,8 +219,8 @@ Ui.Panel {
         if (!root.service) return
         var old = root.service.config || ({})
         var config = {
-          server: {url: urlField.text.trim(), user: userField.text.trim(), insecure: insecure},
-          sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768, notifyOnSuccess: notifyOnSuccess, direction: old.sync ? old.sync.direction || "both" : "both"},
+          server: {url: urlField.text.trim(), user: userField.text.trim(), insecure: insecure, protocol: old.server ? old.server.protocol || "v1" : "v1"},
+          sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768, notifyOnSuccess: notifyOnSuccess, direction: old.sync ? old.sync.direction || "both" : "both", allowSensitive: allowSensitive},
           filter: filterConfig(), history: {enabled: historyEnabled, limit: historyLimit},
           dedupe: {windowSec: dedupeValue}, logging: old.logging || {level: "info"}
         }
@@ -293,6 +297,12 @@ Ui.Panel {
             visible: !root.editing && !root.historyMode
             width: parent.width
             spacing: Style.space(6)
+            Text { visible: root.syncState === "re_pair" && root.repairConfirm; width: parent.width; textFormat: Text.PlainText; text: strings.t("repair_warning"); color: Commons.Color.urgent; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap }
+            Row {
+              visible: root.syncState === "re_pair"; width: parent.width; spacing: Style.space(4)
+              Ui.Button { text: strings.t(root.repairConfirm ? "repair_confirm" : "repair_start"); focusable: true; enabled: !!root.service && root.service.ready; onClicked: { if (root.repairConfirm) { root.repairConfirm = false; root.service.rePair() } else root.repairConfirm = true } }
+              Ui.Button { visible: root.repairConfirm; text: strings.t("cancel"); focusable: true; onClicked: root.repairConfirm = false }
+            }
             Row {
               width: parent.width; spacing: Style.space(4)
               Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("upload"); bordered: true; focusable: true; hasCursor: root.actionIndex === 0 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.push() }
@@ -372,6 +382,7 @@ Ui.Panel {
             Ui.TextField { id: userField; width: parent.width }
             Text { textFormat: Text.PlainText; text: strings.t("password"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }
             Ui.TextField { id: passwordField; width: parent.width; password: true; placeholderText: strings.t("password_hint") }
+            Ui.Toggle { width: parent.width; label: strings.t("allow_sensitive"); description: strings.t("allow_sensitive_note"); checked: keyCatcher.allowSensitive; onClicked: keyCatcher.allowSensitive = !keyCatcher.allowSensitive }
             Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("interval"); from: 30; to: 300; value: keyCatcher.intervalValue; onModified: function(v) { keyCatcher.intervalValue = v } }
             Ui.Dropdown {
               width: parent.width; label: strings.t("filter"); value: keyCatcher.filterValue
@@ -393,7 +404,7 @@ Ui.Panel {
             Ui.Toggle { width: parent.width; label: strings.t("block_downloads"); checked: keyCatcher.blockDownloads; onClicked: keyCatcher.blockDownloads = !keyCatcher.blockDownloads }
             Ui.Toggle { width: parent.width; label: strings.t("history_enabled"); description: strings.t("history_note"); checked: keyCatcher.historyEnabled; onClicked: keyCatcher.historyEnabled = !keyCatcher.historyEnabled }
             Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("history_limit"); from: 1; to: 1000; value: keyCatcher.historyLimit; onModified: function(v) { keyCatcher.historyLimit = v } }
-            Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("dedupe"); from: 0; to: 86400; value: keyCatcher.dedupeValue; onModified: function(v) { keyCatcher.dedupeValue = v } }
+            Ui.NumberField { visible: root.service && root.service.config && root.service.config.server && root.service.config.server.protocol === "legacy"; field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("dedupe"); from: 0; to: 86400; value: keyCatcher.dedupeValue; onModified: function(v) { keyCatcher.dedupeValue = v } }
             Ui.Toggle { width: parent.width; label: strings.t("insecure"); description: strings.t("insecure_note"); checked: keyCatcher.insecure; onClicked: keyCatcher.insecure = !keyCatcher.insecure }
             Text { textFormat: Text.PlainText; visible: root.formError !== ""; width: parent.width; text: root.errorText(root.formError); color: Commons.Color.urgent; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap }
             Row {

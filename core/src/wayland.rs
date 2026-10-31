@@ -11,6 +11,7 @@ use wl_clipboard_rs::{
 };
 
 pub const MIME: &str = "text/plain;charset=utf-8";
+pub const V1_ORIGIN_PREFIX: &str = "application/x-rustclipsync-v1-";
 pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
@@ -21,6 +22,8 @@ pub enum ClipboardError {
     TooLarge,
     InvalidUtf8,
     Timeout,
+    Sensitive,
+    Unavailable,
 }
 impl From<paste::Error> for ClipboardError {
     fn from(e: paste::Error) -> Self {
@@ -52,6 +55,7 @@ pub fn create_watcher() -> Result<Watcher, ClipboardError> {
 /// or stalled offer is reported without exposing its contents and watching continues.
 pub fn watch_loop(
     mut watcher: Watcher,
+    allow_sensitive: bool,
     mut on_text: impl FnMut(Result<String, ClipboardError>),
 ) -> Result<(), ClipboardError> {
     let mut initial = true;
@@ -66,7 +70,7 @@ pub fn watch_loop(
             ..
         } = event
         {
-            if safe_text_offer(&mime_types) {
+            if safe_text_offer(&mime_types, allow_sensitive) {
                 let result = offer
                     .receive(MIME)
                     .map_err(ClipboardError::from)
@@ -78,21 +82,106 @@ pub fn watch_loop(
     Ok(())
 }
 
-fn safe_text_offer(mime_types: &[String]) -> bool {
-    mime_types.iter().any(|m| m == MIME)
-        && !mime_types
-            .iter()
-            .any(|m| m == wl_clipboard_rs::utils::PASSWORD_MANAGER_HINT_MIME_TYPE)
+#[derive(Debug, PartialEq, Eq)]
+pub enum V1ClipboardChange {
+    Text {
+        text: String,
+        origin: Option<String>,
+        sensitive: bool,
+    },
+    Cleared,
 }
 
-/// Used for manual upload; does not print or persist clipboard content.
-pub fn read_current() -> Result<String, ClipboardError> {
-    let (reader, _) = paste::get_contents(
-        paste::ClipboardType::Regular,
-        paste::Seat::Unspecified,
-        paste::MimeType::Specific(MIME),
-    )?;
-    read_bounded(reader, MAX_TEXT_BYTES, READ_TIMEOUT)
+/// V1 needs to observe clears and blocked sensitive offers as well as text.
+/// `changed` runs before reading the offer, allowing concurrent downloads to
+/// reject responses that started before a newer local selection.
+pub fn watch_loop_v1(
+    mut watcher: Watcher,
+    allow_sensitive: bool,
+    mut changed: impl FnMut(),
+    mut on_change: impl FnMut(Result<V1ClipboardChange, ClipboardError>),
+) -> Result<(), ClipboardError> {
+    let mut initial = true;
+    while let Some(event) = watcher.next_event()? {
+        if initial {
+            initial = false;
+            continue;
+        }
+        changed();
+        match event {
+            ClipboardEvent::Cleared { .. } => on_change(Ok(V1ClipboardChange::Cleared)),
+            ClipboardEvent::Changed {
+                mime_types,
+                mut offer,
+                ..
+            } => {
+                if !safe_text_offer(&mime_types, allow_sensitive) {
+                    on_change(Ok(V1ClipboardChange::Cleared));
+                    continue;
+                }
+                let origin = mime_types
+                    .iter()
+                    .find_map(|mime| mime.strip_prefix(V1_ORIGIN_PREFIX))
+                    .filter(|id| {
+                        id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+                    })
+                    .map(str::to_owned);
+                let sensitive = mime_types
+                    .iter()
+                    .any(|m| m == wl_clipboard_rs::utils::PASSWORD_MANAGER_HINT_MIME_TYPE);
+                let text = offer
+                    .receive(MIME)
+                    .map_err(ClipboardError::from)
+                    .and_then(|reader| read_bounded(reader, MAX_TEXT_BYTES, READ_TIMEOUT));
+                on_change(text.map(|text| V1ClipboardChange::Text {
+                    text,
+                    origin,
+                    sensitive,
+                }));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn safe_text_offer(mime_types: &[String], allow_sensitive: bool) -> bool {
+    mime_types.iter().any(|m| m == MIME)
+        && (allow_sensitive
+            || !mime_types
+                .iter()
+                .any(|m| m == wl_clipboard_rs::utils::PASSWORD_MANAGER_HINT_MIME_TYPE))
+}
+
+/// Read the current selection and its MIME hints from the same Wayland offer.
+/// Checking MIME types separately from reading would race with clipboard changes.
+pub fn read_current(allow_sensitive: bool) -> Result<String, ClipboardError> {
+    read_current_with_sensitivity(allow_sensitive).map(|(text, _)| text)
+}
+
+pub fn read_current_with_sensitivity(
+    allow_sensitive: bool,
+) -> Result<(String, bool), ClipboardError> {
+    let mut watcher = create_watcher()?;
+    match watcher.next_event()? {
+        Some(ClipboardEvent::Changed {
+            mime_types,
+            mut offer,
+            ..
+        }) => {
+            if !mime_types.iter().any(|mime| mime == MIME) {
+                return Err(ClipboardError::Unavailable);
+            }
+            if !safe_text_offer(&mime_types, allow_sensitive) {
+                return Err(ClipboardError::Sensitive);
+            }
+            let reader = offer.receive(MIME)?;
+            let sensitive = mime_types
+                .iter()
+                .any(|m| m == wl_clipboard_rs::utils::PASSWORD_MANAGER_HINT_MIME_TYPE);
+            read_bounded(reader, MAX_TEXT_BYTES, READ_TIMEOUT).map(|text| (text, sensitive))
+        }
+        _ => Err(ClipboardError::Unavailable),
+    }
 }
 
 /// The library starts a serving thread for the selection; no child process is spawned.
@@ -104,6 +193,47 @@ pub fn write_text(text: &str) -> Result<(), ClipboardError> {
         copy::Source::Bytes(text.as_bytes().into()),
         copy::MimeType::Text,
     )?;
+    Ok(())
+}
+
+/// Attach an origin MIME marker to recognize our own Wayland selection event.
+pub fn write_text_marked(
+    text: &str,
+    message_id: &str,
+    sensitive: bool,
+) -> Result<(), ClipboardError> {
+    if text.len() > MAX_TEXT_BYTES {
+        return Err(ClipboardError::TooLarge);
+    }
+    if message_id.len() != 36
+        || !message_id
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b'-')
+    {
+        return Err(ClipboardError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid message id",
+        )));
+    }
+    let mut sources = vec![
+        copy::MimeSource {
+            source: copy::Source::Bytes(text.as_bytes().into()),
+            mime_type: copy::MimeType::Text,
+        },
+        copy::MimeSource {
+            source: copy::Source::Bytes(Box::new([])),
+            mime_type: copy::MimeType::Specific(format!("{V1_ORIGIN_PREFIX}{message_id}")),
+        },
+    ];
+    if sensitive {
+        sources.push(copy::MimeSource {
+            source: copy::Source::Bytes(Box::new([])),
+            mime_type: copy::MimeType::Specific(
+                wl_clipboard_rs::utils::PASSWORD_MANAGER_HINT_MIME_TYPE.into(),
+            ),
+        });
+    }
+    copy::Options::new().copy_multi(sources)?;
     Ok(())
 }
 
@@ -163,12 +293,22 @@ mod tests {
     use std::{io::Write, os::unix::net::UnixStream};
     #[test]
     fn ignores_password_manager_hints() {
-        assert!(safe_text_offer(&[MIME.into()]));
-        assert!(!safe_text_offer(&[
-            MIME.into(),
-            wl_clipboard_rs::utils::PASSWORD_MANAGER_HINT_MIME_TYPE.into()
-        ]));
-        assert!(!safe_text_offer(&["image/png".into()]));
+        assert!(safe_text_offer(&[MIME.into()], false));
+        assert!(!safe_text_offer(
+            &[
+                MIME.into(),
+                wl_clipboard_rs::utils::PASSWORD_MANAGER_HINT_MIME_TYPE.into()
+            ],
+            false
+        ));
+        assert!(safe_text_offer(
+            &[
+                MIME.into(),
+                wl_clipboard_rs::utils::PASSWORD_MANAGER_HINT_MIME_TYPE.into()
+            ],
+            true
+        ));
+        assert!(!safe_text_offer(&["image/png".into()], true));
     }
     #[test]
     fn bounded_utf8_and_oversize() {

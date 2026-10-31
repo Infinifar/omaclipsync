@@ -85,7 +85,7 @@ exit 1
         config.parent.mkdir(parents=True)
         cfg = {
             "server": {"url": f"https://127.0.0.1:{server.server_port}",
-                       "user": "fixture", "insecure": True},
+                       "user": "fixture", "insecure": True, "protocol": "legacy"},
             "sync": {"intervalSec": 30},
             "logging": {"level": "info"},
         }

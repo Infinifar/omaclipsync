@@ -23,13 +23,13 @@ impl Remote for Server {
     }
 }
 pub trait Clipboard {
-    fn read(&self) -> Result<String, wayland::ClipboardError>;
+    fn read(&self, allow_sensitive: bool) -> Result<String, wayland::ClipboardError>;
     fn write(&self, text: &str) -> Result<(), wayland::ClipboardError>;
 }
 pub struct WaylandClipboard;
 impl Clipboard for WaylandClipboard {
-    fn read(&self) -> Result<String, wayland::ClipboardError> {
-        wayland::read_current()
+    fn read(&self, allow_sensitive: bool) -> Result<String, wayland::ClipboardError> {
+        wayland::read_current(allow_sensitive)
     }
     fn write(&self, text: &str) -> Result<(), wayland::ClipboardError> {
         wayland::write_text(text)
@@ -84,8 +84,11 @@ impl<R: Remote, C: Clipboard> Session<R, C> {
         let decision = self.engine.clipboard_changed(text);
         self.upload_decision(text, decision)
     }
-    pub fn push_now(&mut self) -> Result<Outcome, SyncError> {
-        let text = self.clipboard.read().map_err(SyncError::Clipboard)?;
+    pub fn push_now(&mut self, allow_sensitive: bool) -> Result<Outcome, SyncError> {
+        let text = self
+            .clipboard
+            .read(allow_sensitive)
+            .map_err(SyncError::Clipboard)?;
         let decision = self.engine.manual_upload(&text);
         self.upload_decision(&text, decision)
     }
@@ -160,6 +163,7 @@ mod tests {
         pushes: usize,
         fail_write: bool,
         fail_push: bool,
+        clipboard_sensitive: bool,
     }
     struct MockRemote(Rc<RefCell<MockState>>);
     impl Remote for MockRemote {
@@ -192,7 +196,10 @@ mod tests {
     }
     struct MockClipboard(Rc<RefCell<MockState>>);
     impl Clipboard for MockClipboard {
-        fn read(&self) -> Result<String, wayland::ClipboardError> {
+        fn read(&self, allow_sensitive: bool) -> Result<String, wayland::ClipboardError> {
+            if self.0.borrow().clipboard_sensitive && !allow_sensitive {
+                return Err(wayland::ClipboardError::Sensitive);
+            }
             Ok("local".into())
         }
         fn write(&self, _text: &str) -> Result<(), wayland::ClipboardError> {
@@ -205,6 +212,30 @@ mod tests {
             s.writes += 1;
             Ok(())
         }
+    }
+    #[test]
+    fn manual_push_obeys_sensitive_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Rc::new(RefCell::new(MockState {
+            clipboard_sensitive: true,
+            ..Default::default()
+        }));
+        let mut session = Session::new(
+            MockRemote(state.clone()),
+            MockClipboard(state.clone()),
+            Filter::new(FilterMode::Off, &[], false).unwrap(),
+            Duration::from_secs(300),
+            true,
+            32768,
+            History::new(dir.path().join("history"), false, 50).unwrap(),
+        );
+        assert!(matches!(
+            session.push_now(false),
+            Err(SyncError::Clipboard(wayland::ClipboardError::Sensitive))
+        ));
+        assert_eq!(state.borrow().pushes, 0);
+        assert_eq!(session.push_now(true).unwrap(), Outcome::Uploaded);
+        assert_eq!(state.borrow().pushes, 1);
     }
     #[test]
     fn local_remote_loop_and_failed_write_retry() {

@@ -5,6 +5,7 @@ const before = settings.snapshot({refreshIntervalSec: 3, filterEnabled: true, hi
 const changed = settings.changed(before, settings.snapshot({refreshIntervalSec: 60, filterEnabled: true, historyEnabled: false}))
 assert.deepEqual(changed, {refreshIntervalSec: 60})
 assert.equal(settings.merge(original, changed).sync.intervalSec, 60)
+assert.equal(settings.merge({sync: {intervalSec: 60, allowSensitive: true}, filter: {mode: "off"}, history: {}}, {refreshIntervalSec: 90}).sync.allowSensitive, true)
 assert.equal(settings.merge(original, changed).filter.mode, "whitelist")
 assert.equal(original.sync.intervalSec, 3)
 assert.equal(settings.merge(original, {filterEnabled: false}).filter.mode, "off")

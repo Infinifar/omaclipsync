@@ -1,14 +1,15 @@
 //! Shell-owned daemon. Stdout is exclusively the versioned JSON-lines protocol.
 use chrono::Utc;
 use omaclipsync_core::{
-    config::{Config, ConfigError, SyncDirection},
+    config::{Config, ConfigError, ServerProtocol, SyncDirection},
     history::{Entry, History, HistoryError},
     keyring,
     logging::{Event, Level, Logger},
     protocol::{self, Request},
     session::{Outcome, Session, SyncError, WaylandClipboard},
     signalr::{self, Event as SignalEvent},
-    wayland, Error, Server,
+    v1_session::{self, V1Error},
+    v1_worker, wayland, Error, Server,
 };
 use serde_json::{json, Value};
 use std::{
@@ -17,6 +18,7 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
+        atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender},
         Arc, Mutex,
     },
@@ -86,6 +88,13 @@ struct App {
     paths: Paths,
     config: Config,
     session: Option<LiveSession>,
+    v1: Option<v1_session::Session<v1_session::WaylandClipboard>>,
+    v1_worker: Option<v1_worker::Worker>,
+    v1_conflict: bool,
+    v1_latest: Arc<Mutex<Option<(u64, u64, wayland::V1ClipboardChange)>>>,
+    clipboard_serial: Arc<AtomicU64>,
+    processed_clipboard_serial: u64,
+    active_watcher: Arc<Mutex<u64>>,
     state: &'static str,
     last_sync: Option<u64>,
     log_error: bool,
@@ -130,6 +139,13 @@ impl App {
             paths,
             config: Config::default(),
             session: None,
+            v1: None,
+            v1_worker: None,
+            v1_conflict: false,
+            v1_latest: Arc::new(Mutex::new(None)),
+            clipboard_serial: Arc::new(AtomicU64::new(0)),
+            processed_clipboard_serial: 0,
+            active_watcher: Arc::new(Mutex::new(0)),
             state: "needs_config",
             last_sync: None,
             log_error: false,
@@ -179,6 +195,7 @@ impl App {
             Err(_) => {
                 self.stop_signalr();
                 self.session = None;
+                self.v1 = None;
                 self.state = "config_error";
                 self.log(Event::ConfigError);
                 self.stop_watcher();
@@ -189,6 +206,17 @@ impl App {
     }
     fn apply(&mut self, config: Config) {
         self.stop_signalr();
+        let use_v1 = config.server.protocol == ServerProtocol::V1;
+        if use_v1 != self.v1.is_some() {
+            self.stop_watcher();
+        }
+        self.v1 = None;
+        self.v1_conflict = false;
+        // A watcher captures this policy at startup. Cancel it and discard
+        // queued clipboard data before adopting a changed sensitive policy.
+        if self.config.sync.allow_sensitive != config.sync.allow_sensitive {
+            self.stop_watcher();
+        }
         if self.config.sync.direction != config.sync.direction {
             self.pending = None;
             if let Ok(mut latest) = self.latest.lock() {
@@ -240,7 +268,7 @@ impl App {
                 return;
             }
         };
-        if self.config.sync.enabled && self.config.sync.direction.can_receive() {
+        if !use_v1 && self.config.sync.enabled && self.config.sync.direction.can_receive() {
             self.signal_options = Some(SignalOptions {
                 url: self.config.server.url.clone(),
                 user: self.config.server.user.clone(),
@@ -251,7 +279,7 @@ impl App {
         let server = match Server::with_tls(
             &self.config.server.url,
             self.config.server.user.clone(),
-            password,
+            password.clone(),
             self.config.server.insecure,
         ) {
             Ok(s) => s,
@@ -282,6 +310,56 @@ impl App {
                 history,
             ));
         }
+        if use_v1 {
+            let history = match History::new(
+                &self.paths.history,
+                self.config.history.enabled,
+                self.config.history.limit,
+            ) {
+                Ok(history) => history,
+                Err(_) => {
+                    self.session = None;
+                    self.state = "config_error";
+                    self.stop_watcher();
+                    return;
+                }
+            };
+            let filter = match self.config.validate() {
+                Ok(filter) => filter,
+                Err(_) => {
+                    self.session = None;
+                    self.state = "config_error";
+                    self.stop_watcher();
+                    return;
+                }
+            };
+            match v1_session::Session::open(
+                &self.config.server.url,
+                &self.config.server.user,
+                password,
+                self.config.server.insecure,
+                &self.paths.logs,
+                v1_session::WaylandClipboard,
+                filter,
+                self.config.sync.allow_sensitive,
+                history,
+                Arc::clone(&self.clipboard_serial),
+            ) {
+                Ok(session) => self.v1 = Some(session),
+                Err(V1Error::Keyring) => {
+                    self.session = None;
+                    self.state = "credentials";
+                    self.stop_watcher();
+                    return;
+                }
+                Err(_) => {
+                    self.session = None;
+                    self.state = "config_error";
+                    self.stop_watcher();
+                    return;
+                }
+            }
+        }
         self.state = if self.config.sync.enabled {
             "connecting"
         } else {
@@ -303,6 +381,7 @@ impl App {
         self.signal_connected = false;
         self.signal_options = None;
         self.signal_worker = None;
+        self.v1_worker = None;
         while self.signal_rx.try_recv().is_ok() {}
     }
     fn fallback_interval(&self) -> Duration {
@@ -341,12 +420,20 @@ impl App {
     }
     fn stop_watcher(&mut self) {
         self.watcher_generation += 1;
+        if let Ok(mut active) = self.active_watcher.lock() {
+            *active = self.watcher_generation;
+            self.processed_clipboard_serial =
+                self.clipboard_serial.fetch_add(1, Ordering::SeqCst) + 1;
+        }
         self.watcher_active = false;
         if let Some(cancel) = self.watcher_cancel.take() {
             cancel.cancel();
         }
         self.pending = None;
         if let Ok(mut latest) = self.latest.lock() {
+            *latest = None;
+        }
+        if let Ok(mut latest) = self.v1_latest.lock() {
             *latest = None;
         }
     }
@@ -370,9 +457,82 @@ impl App {
         self.watcher_active = true;
         self.watcher_generation += 1;
         let generation = self.watcher_generation;
+        if let Ok(mut active) = self.active_watcher.lock() {
+            *active = generation;
+            self.processed_clipboard_serial = self.clipboard_serial.load(Ordering::SeqCst);
+        }
+        let allow_sensitive = self.config.sync.allow_sensitive;
         let tx = self.sender.clone();
         let latest = self.latest.clone();
+        let v1_latest = Arc::clone(&self.v1_latest);
+        let serial = Arc::clone(&self.clipboard_serial);
+        let active = Arc::clone(&self.active_watcher);
+        let changed_active = Arc::clone(&active);
+        let use_v1 = self.v1.is_some();
         thread::spawn(move || {
+            if use_v1 {
+                if let Ok(watcher) = wayland::create_watcher() {
+                    if tx
+                        .send(Message::WatcherReady(
+                            generation,
+                            WatchCancel::Native(watcher.cancel_handle()),
+                        ))
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let result = wayland::watch_loop_v1(
+                        watcher,
+                        allow_sensitive,
+                        || {
+                            if let Ok(active) = changed_active.lock() {
+                                if *active == generation {
+                                    serial.fetch_add(1, Ordering::SeqCst);
+                                }
+                            }
+                        },
+                        |item| match item {
+                            Ok(change) => {
+                                if let Ok(active) = active.lock() {
+                                    if *active == generation {
+                                        if let Ok(mut value) = v1_latest.lock() {
+                                            *value = Some((
+                                                generation,
+                                                serial.load(Ordering::SeqCst),
+                                                change,
+                                            ));
+                                        }
+                                        let _ = tx.try_send(Message::Clipboard);
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                if let Ok(active) = active.lock() {
+                                    if *active == generation {
+                                        if let Ok(mut value) = v1_latest.lock() {
+                                            *value = Some((
+                                                generation,
+                                                serial.load(Ordering::SeqCst),
+                                                wayland::V1ClipboardChange::Cleared,
+                                            ));
+                                        }
+                                        let _ = tx.try_send(Message::ClipboardError(generation));
+                                    }
+                                }
+                            }
+                        },
+                    );
+                    if result.is_err() {
+                        let _ = tx.try_send(Message::ClipboardError(generation));
+                    }
+                } else {
+                    // The old wl-paste fallback cannot reliably identify our
+                    // own V1 selection or every clear; fail closed.
+                    let _ = tx.try_send(Message::ClipboardError(generation));
+                }
+                let _ = tx.send(Message::WatcherEnded(generation));
+                return;
+            }
             if let Ok(watcher) = wayland::create_watcher() {
                 if tx
                     .send(Message::WatcherReady(
@@ -383,7 +543,7 @@ impl App {
                 {
                     return;
                 }
-                let result = wayland::watch_loop(watcher, |item| match item {
+                let result = wayland::watch_loop(watcher, allow_sensitive, |item| match item {
                     Ok(text) => {
                         if let Ok(mut value) = latest.lock() {
                             *value = Some((generation, text));
@@ -397,7 +557,7 @@ impl App {
                 if result.is_err() {
                     let _ = tx.try_send(Message::ClipboardError(generation));
                 }
-            } else if fallback_watch(generation, &tx, &latest).is_err() {
+            } else if fallback_watch(generation, allow_sensitive, &tx, &latest).is_err() {
                 let _ = tx.try_send(Message::ClipboardError(generation));
             }
             let _ = tx.send(Message::WatcherEnded(generation));
@@ -413,7 +573,12 @@ impl App {
         } else {
             "polling"
         };
-        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
+        let transport = if self.v1.is_some() && transport == "signalr" {
+            "v1"
+        } else {
+            transport
+        };
+        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"deviceId":self.v1.as_ref().map(|s| &s.persisted.state.device_id),"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error) || self.v1.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
     }
     fn stamp_sync(&mut self) {
         self.last_sync = Some(
@@ -429,6 +594,10 @@ impl App {
             .session
             .as_ref()
             .is_some_and(|session| session.history_error)
+            || self
+                .v1
+                .as_ref()
+                .is_some_and(|session| session.history_error)
         {
             self.log(Event::HistoryError);
         }
@@ -484,6 +653,10 @@ impl App {
         }
         self.signal_events(now);
         self.ensure_watcher(now);
+        if self.v1.is_some() {
+            self.tick_v1(out, now);
+            return;
+        }
         if let Ok(mut latest) = self.latest.lock() {
             if let Some((generation, text)) = latest.take() {
                 if generation == self.watcher_generation && self.wants_watcher() {
@@ -589,6 +762,162 @@ impl App {
         self.next_poll = Instant::now();
         let _ = protocol::event(out, "activity", &json!({"active":false}));
     }
+
+    fn v1_failure(&mut self, error: V1Error) {
+        self.state = match error {
+            V1Error::Remote(Error::Status(401 | 403)) | V1Error::Keyring => "credentials",
+            V1Error::Remote(Error::Status(409)) | V1Error::Conflict => {
+                self.v1_conflict = true;
+                "conflict"
+            }
+            V1Error::Expired => {
+                self.v1_conflict = true;
+                "expired"
+            }
+            V1Error::Epoch => {
+                self.v1_conflict = true;
+                "re_pair"
+            }
+            V1Error::Storage(_) => {
+                self.v1_conflict = true;
+                "storage_error"
+            }
+            V1Error::Clipboard(_) => "clipboard_error",
+            _ => "offline",
+        };
+        self.next_poll = Instant::now() + Duration::from_secs(self.backoff);
+        self.backoff = (self.backoff * 2).min(30);
+    }
+
+    fn tick_v1(&mut self, out: &mut impl Write, now: Instant) {
+        let change = self
+            .v1_latest
+            .lock()
+            .ok()
+            .and_then(|mut latest| latest.take());
+        if let Some((generation, serial, change)) = change {
+            if generation == self.watcher_generation && self.wants_watcher() {
+                self.processed_clipboard_serial = serial;
+                if !self.config.sync.direction.can_push() {
+                    return;
+                }
+                let result = match change {
+                    wayland::V1ClipboardChange::Text {
+                        text,
+                        origin,
+                        sensitive,
+                    } => self.v1.as_mut().unwrap().record_local(
+                        &text,
+                        origin.as_deref(),
+                        sensitive,
+                        now,
+                    ),
+                    wayland::V1ClipboardChange::Cleared => self.v1.as_mut().unwrap().record_clear(),
+                };
+                match result {
+                    Ok(outcome) => {
+                        self.note_outcome(&outcome);
+                        if self.state != "offline" && self.state != "credentials" {
+                            self.next_poll = now;
+                        }
+                    }
+                    Err(error) => {
+                        self.v1_failure(error);
+                        return;
+                    }
+                }
+            }
+        }
+        if !self.config.sync.enabled
+            || self.session.is_none()
+            || now < self.next_poll
+            || self.v1_conflict
+        {
+            return;
+        }
+        if self.clipboard_serial.load(Ordering::SeqCst) != self.processed_clipboard_serial {
+            return;
+        }
+        if self.watcher_cancel.is_none() {
+            self.state = "clipboard_error";
+            self.next_poll = now + Duration::from_secs(1);
+            return;
+        }
+        if self.needs_check {
+            if let Err(error) = self.v1.as_mut().unwrap().check() {
+                self.v1_failure(error);
+                return;
+            }
+            self.needs_check = false;
+            self.pull_pending = true;
+            if self.config.sync.direction.can_receive() {
+                let session = self.v1.as_ref().unwrap();
+                self.v1_worker = Some(v1_worker::Worker::start(
+                    Arc::clone(&session.remote),
+                    session.persisted.notification_identity(),
+                    self.signal_generation,
+                    self.signal_tx.clone(),
+                ));
+            }
+            self.state = "connected";
+        }
+        let pending = self.v1.as_ref().unwrap().has_pending();
+        let may_flush = self.config.sync.direction.can_push()
+            || self.v1.as_ref().unwrap().persisted.state.pending.is_none();
+        let receive_due = self.config.sync.direction.can_receive()
+            && ((self.pull_pending && now >= self.next_signal_pull)
+                || (!self.signal_connected && now >= self.next_fallback));
+        if !(pending && may_flush) && !receive_due {
+            return;
+        }
+        let _ = protocol::event(out, "activity", &json!({"active":true}));
+        if pending && may_flush {
+            if self.clipboard_serial.load(Ordering::SeqCst) != self.processed_clipboard_serial {
+                let _ = protocol::event(out, "activity", &json!({"active":false}));
+                return;
+            }
+            let observed = self.clipboard_serial.load(Ordering::SeqCst);
+            match self.v1.as_mut().unwrap().flush(observed) {
+                Ok(outcome) => {
+                    self.note_outcome(&outcome);
+                    emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
+                }
+                Err(error) => {
+                    self.v1_failure(error);
+                    let _ = protocol::event(out, "activity", &json!({"active":false}));
+                    return;
+                }
+            }
+        }
+        if receive_due {
+            if self.clipboard_serial.load(Ordering::SeqCst) != self.processed_clipboard_serial {
+                let _ = protocol::event(out, "activity", &json!({"active":false}));
+                return;
+            }
+            let observed = self.clipboard_serial.load(Ordering::SeqCst);
+            match self.v1.as_mut().unwrap().pull(observed, now) {
+                Ok(outcome) => {
+                    self.note_outcome(&outcome);
+                    emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
+                    self.pull_pending = false;
+                    self.next_fallback = Instant::now() + self.fallback_interval();
+                    self.next_signal_pull = Instant::now() + Duration::from_millis(500);
+                }
+                Err(error) => {
+                    self.v1_failure(error);
+                    let _ = protocol::event(out, "activity", &json!({"active":false}));
+                    return;
+                }
+            }
+        }
+        if let (Some(worker), Some(session)) = (&self.v1_worker, &self.v1) {
+            worker.update(&session.persisted);
+        }
+        self.state = "connected";
+        self.backoff = 1;
+        self.next_poll = Instant::now();
+        let _ = protocol::event(out, "activity", &json!({"active":false}));
+    }
     fn handle(&mut self, request: Request) -> (u64, Result<Value, &'static str>, bool) {
         let id = request.id;
         let result = match request.method.as_str() {
@@ -632,6 +961,27 @@ impl App {
                         }
                     }
                     _ => Err("invalid_filter"),
+                }
+            }
+            "re_pair" if self.v1.is_some() => {
+                if request.params.get("confirm").and_then(Value::as_bool) != Some(true) {
+                    Err("confirmation_required")
+                } else {
+                    self.stop_signalr();
+                    match self.v1.as_mut().unwrap().re_pair() {
+                        Ok(()) => {
+                            self.v1_conflict = false;
+                            self.needs_check = true;
+                            self.pull_pending = true;
+                            self.state = "connecting";
+                            self.next_poll = Instant::now();
+                            Ok(self.status())
+                        }
+                        Err(error) => {
+                            self.v1_failure(error);
+                            Err("sync_failed")
+                        }
+                    }
                 }
             }
             "set_password" => {
@@ -697,10 +1047,49 @@ impl App {
                     Err(_) => Err("invalid_config"),
                 }
             }
-            "push" => match self.session.as_mut().map(|s| s.push_now()) {
+            "push" if self.v1.is_some() => {
+                if self.watcher_cancel.is_none()
+                    || self.clipboard_serial.load(Ordering::SeqCst)
+                        != self.processed_clipboard_serial
+                {
+                    Err("clipboard_unavailable")
+                } else {
+                    if let Ok(mut latest) = self.v1_latest.lock() {
+                        *latest = None;
+                    }
+                    let observed = self.clipboard_serial.load(Ordering::SeqCst);
+                    match self.v1.as_mut().unwrap().push_now(observed) {
+                        Ok(outcome) => {
+                            self.v1_conflict = false;
+                            self.state = "connected";
+                            self.next_poll = Instant::now();
+                            if let (Some(worker), Some(session)) = (&self.v1_worker, &self.v1) {
+                                worker.update(&session.persisted);
+                            }
+                            self.note_outcome(&outcome);
+                            Ok(json!({"outcome":outcome_name(&outcome)}))
+                        }
+                        Err(V1Error::Clipboard(wayland::ClipboardError::Sensitive)) => {
+                            Err("sensitive_blocked")
+                        }
+                        Err(error) => {
+                            self.v1_failure(error);
+                            Err("sync_failed")
+                        }
+                    }
+                }
+            }
+            "push" => match self
+                .session
+                .as_mut()
+                .map(|s| s.push_now(self.config.sync.allow_sensitive))
+            {
                 Some(Ok(outcome)) => {
                     self.note_outcome(&outcome);
                     Ok(json!({"outcome":outcome_name(&outcome)}))
+                }
+                Some(Err(SyncError::Clipboard(wayland::ClipboardError::Sensitive))) => {
+                    Err("sensitive_blocked")
                 }
                 Some(Err(err)) => {
                     self.failure(err);
@@ -708,6 +1097,33 @@ impl App {
                 }
                 None => Err("not_configured"),
             },
+            "pull" if self.v1.is_some() => {
+                if request.params.get("force").and_then(Value::as_bool) == Some(true) {
+                    Err("force_not_supported")
+                } else if self.watcher_cancel.is_none()
+                    || self.clipboard_serial.load(Ordering::SeqCst)
+                        != self.processed_clipboard_serial
+                {
+                    Err("clipboard_unavailable")
+                } else if self.v1_conflict {
+                    Err("sync_failed")
+                } else {
+                    let observed = self.clipboard_serial.load(Ordering::SeqCst);
+                    match self.v1.as_mut().unwrap().pull(observed, Instant::now()) {
+                        Ok(outcome) => {
+                            if let (Some(worker), Some(session)) = (&self.v1_worker, &self.v1) {
+                                worker.update(&session.persisted);
+                            }
+                            self.note_outcome(&outcome);
+                            Ok(json!({"outcome":outcome_name(&outcome)}))
+                        }
+                        Err(error) => {
+                            self.v1_failure(error);
+                            Err("sync_failed")
+                        }
+                    }
+                }
+            }
             "pull" if self.config.sync.enabled && self.watcher_cancel.is_none() => {
                 Err("clipboard_unavailable")
             }
@@ -840,10 +1256,10 @@ fn history_text(entries: Vec<Entry>, digest: &str) -> Option<String> {
 }
 // wl-paste executes one helper per selection and waits for it to finish. Frames
 // are therefore serialized; a u32::MAX frame denotes an empty/sensitive offer.
-fn watch_event() {
+fn watch_event(allow_sensitive: bool) {
     let state = env::var("CLIPBOARD_STATE").unwrap_or_default();
     let mut output = io::stdout().lock();
-    if state != "data" {
+    if state != "data" && !(state == "sensitive" && allow_sensitive) {
         let _ = output.write_all(&u32::MAX.to_be_bytes());
         return;
     }
@@ -899,15 +1315,21 @@ fn fallback_snapshot() -> Option<String> {
 }
 fn fallback_watch(
     generation: u64,
+    allow_sensitive: bool,
     tx: &SyncSender<Message>,
     latest: &Arc<Mutex<Option<(u64, String)>>>,
 ) -> io::Result<()> {
     let initial_hash = fallback_snapshot();
     let exe = env::current_exe()?;
-    let mut child = Command::new("wl-paste")
+    let mut command = Command::new("wl-paste");
+    command
         .args(["--type", wayland::MIME, "--watch"])
         .arg(exe)
-        .arg("--watch-event")
+        .arg("--watch-event");
+    if allow_sensitive {
+        command.arg("--allow-sensitive");
+    }
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1001,7 +1423,7 @@ fn emit_sync_success(out: &mut impl Write, outcome: &Outcome, enabled: bool) {
 }
 fn main() {
     if env::args().nth(1).as_deref() == Some("--watch-event") {
-        watch_event();
+        watch_event(env::args().nth(2).as_deref() == Some("--allow-sensitive"));
         return;
     }
     let Some(paths) = Paths::from_env() else {
@@ -1117,6 +1539,30 @@ fn main() {
 mod tests {
     use super::*;
     use omaclipsync_core::{Filter, FilterMode};
+
+    #[test]
+    fn changing_sensitive_policy_discards_pending_events_and_invalidates_old_watcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config: dir.path().join("config.json"),
+            history: dir.path().join("history.json"),
+            logs: dir.path().join("logs"),
+        };
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let latest = Arc::new(Mutex::new(None));
+        let mut app = App::new(paths, tx, latest.clone(), false);
+        app.config.sync.allow_sensitive = true;
+        app.pending = Some("pending fixture".into());
+        *latest.lock().unwrap() = Some((app.watcher_generation, "latest fixture".into()));
+        let old_generation = app.watcher_generation;
+        let mut config = app.config.clone();
+        config.sync.allow_sensitive = false;
+        app.apply(config);
+        assert!(app.pending.is_none());
+        assert!(latest.lock().unwrap().is_none());
+        assert_ne!(app.watcher_generation, old_generation);
+        assert!(!app.config.sync.allow_sensitive);
+    }
 
     #[test]
     fn direction_command_validates_and_persists_without_changing_pause() {

@@ -25,6 +25,14 @@ pub struct ServerConfig {
     pub url: String,
     pub user: String,
     pub insecure: bool,
+    pub protocol: ServerProtocol,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerProtocol {
+    #[default]
+    V1,
+    Legacy,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
@@ -34,6 +42,7 @@ pub struct SyncConfig {
     pub max_inline_bytes: usize,
     pub notify_on_success: bool,
     pub direction: SyncDirection,
+    pub allow_sensitive: bool,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -59,6 +68,7 @@ impl Default for SyncConfig {
             max_inline_bytes: 32768,
             notify_on_success: true,
             direction: SyncDirection::Both,
+            allow_sensitive: false,
         }
     }
 }
@@ -227,6 +237,8 @@ mod tests {
         assert!(cfg.sync.notify_on_success);
         let old: Config = serde_json::from_str(r#"{"sync":{"enabled":true}}"#).unwrap();
         assert!(old.sync.notify_on_success);
+        assert!(!cfg.sync.allow_sensitive);
+        assert!(!old.sync.allow_sensitive);
         assert_eq!(old.sync.direction, SyncDirection::Both);
         assert!(serde_json::from_str::<Config>(r#"{"sync":{"direction":"invalid"}}"#).is_err());
         cfg.server.url = "https://example.org/base".into();

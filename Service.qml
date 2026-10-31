@@ -119,6 +119,7 @@ Item {
   function reloadHistory(offset) { request("history", {offset: Math.max(0, Number(offset || 0))}) }
   function push() { return request("push") }
   function pull(force) { return request("pull", {force: force === true}) }
+  function rePair() { return request("re_pair", {confirm: true}) }
   function toggleSync() { return request("toggle") }
   function setDirection(direction) { return request("set_direction", {direction: direction}) }
   Component.onCompleted: launch()

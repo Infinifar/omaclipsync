@@ -54,9 +54,13 @@ fn daemon_handshake_status_toggle_and_shutdown() {
 
 #[test]
 fn fallback_helper_frames_text_and_suppresses_sensitive_offers() {
-    fn run(state: &str, data: &[u8]) -> Vec<u8> {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_syncclipd"))
-            .arg("--watch-event")
+    fn run(state: &str, allow_sensitive: bool, data: &[u8]) -> Vec<u8> {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_syncclipd"));
+        command.arg("--watch-event");
+        if allow_sensitive {
+            command.arg("--allow-sensitive");
+        }
+        let mut child = command
             .env("CLIPBOARD_STATE", state)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -68,12 +72,17 @@ fn fallback_helper_frames_text_and_suppresses_sensitive_offers() {
         assert!(result.status.success());
         result.stdout
     }
-    let frame = run("data", "测试".as_bytes());
+    let frame = run("data", false, "测试".as_bytes());
     assert_eq!(
         u32::from_be_bytes(frame[..4].try_into().unwrap()) as usize,
         "测试".len()
     );
     assert_eq!(&frame[4..], "测试".as_bytes());
-    let sensitive = run("sensitive", b"private-example");
+    let sensitive = run("sensitive", false, b"private-example");
     assert_eq!(sensitive, u32::MAX.to_be_bytes());
+    let allowed = run("sensitive", true, b"private-example");
+    assert_eq!(u32::from_be_bytes(allowed[..4].try_into().unwrap()), 15);
+    assert_eq!(&allowed[4..], b"private-example");
+    assert_eq!(run("nil", true, b"ignored"), u32::MAX.to_be_bytes());
+    assert_eq!(run("unexpected", true, b"ignored"), u32::MAX.to_be_bytes());
 }

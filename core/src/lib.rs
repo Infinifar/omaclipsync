@@ -12,6 +12,10 @@ use std::{
 use url::Url;
 
 pub mod signalr;
+pub mod v1_client;
+pub mod v1_session;
+pub mod v1_state;
+pub mod v1_worker;
 
 pub const MAX_TEXT_BYTES: usize = 10 * 1024 * 1024;
 const MAX_METADATA_BYTES: u64 = 256 * 1024;

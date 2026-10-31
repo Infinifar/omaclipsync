@@ -30,10 +30,12 @@ def profile(text):
 
 
 def main():
-    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] not in ("--blacklist", "--push-only", "--receive-only")):
-        raise SystemExit("usage: mocked_e2e.py /path/to/syncclipd [--blacklist|--push-only|--receive-only]")
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] not in ("--blacklist", "--push-only", "--receive-only", "--sensitive-on", "--sensitive-off")):
+        raise SystemExit("usage: mocked_e2e.py /path/to/syncclipd [--blacklist|--push-only|--receive-only|--sensitive-on|--sensitive-off]")
     binary = Path(sys.argv[1]).resolve(strict=True)
     blacklist = len(sys.argv) == 3 and sys.argv[2] == "--blacklist"
+    sensitive_case = len(sys.argv) == 3 and sys.argv[2] in ("--sensitive-on", "--sensitive-off")
+    allow_sensitive = len(sys.argv) == 3 and sys.argv[2] == "--sensitive-on"
     direction = {"--push-only": "push", "--receive-only": "receive"}.get(sys.argv[2] if len(sys.argv) == 3 else "", "both")
     with tempfile.TemporaryDirectory(prefix="omaclipsync-e2e-") as tmp:
         root = Path(tmp)
@@ -103,22 +105,23 @@ def main():
         paste.write_text("""#!/bin/sh
 if [ "$1" = "--no-newline" ]; then printf '%s' fixture-initial; exit 0; fi
 if [ "$1" = "--type" ] && [ "$3" = "--watch" ]; then
-  printf '%s' fixture-initial | CLIPBOARD_STATE=data "$4" "$5"
+  shift 3
+  printf '%s' fixture-initial | CLIPBOARD_STATE=data "$@"
   sleep 0.2
-  printf '%s' fixture-blocked | CLIPBOARD_STATE=data "$4" "$5"
+  printf '%s' fixture-blocked | CLIPBOARD_STATE=data "$@"
   sleep 0.2
-  printf '%s' fixture-local | CLIPBOARD_STATE=data "$4" "$5"
+  printf '%s' fixture-local | CLIPBOARD_STATE=EVENT_STATE "$@"
   sleep 8
   exit 0
 fi
 exit 1
-""")
+""".replace("EVENT_STATE", "sensitive" if sensitive_case else "data"))
         paste.chmod(0o700)
         config = root / "config/omaclipsync/config.json"
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({
-            "server": {"url": f"https://127.0.0.1:{server.server_port}", "user": "fixture", "insecure": True},
-            "sync": {"direction": direction},
+            "server": {"url": f"https://127.0.0.1:{server.server_port}", "user": "fixture", "insecure": True, "protocol": "legacy"},
+            "sync": {"direction": direction, "allowSensitive": allow_sensitive},
             "filter": {"mode": "blacklist" if blacklist else "whitelist",
                        "patterns": ["^fixture-(blocked|remote)$"] if blacklist else ["^fixture-local$"],
                        "alsoBlockDownloads": True},
@@ -152,15 +155,15 @@ exit 1
                     uploaded = len(state["uploads"])
                 if uploaded and direction != "receive":
                     break
-                if direction == "receive" and time.monotonic() > deadline - 16:
+                if (direction == "receive" or (sensitive_case and not allow_sensitive)) and time.monotonic() > deadline - 16:
                     break
             with lock:
                 uploads = list(state["uploads"])
                 unauthorized = state["unauthorized"]
                 reads = state["reads"]
             assert any(m.get("id") == 1 and m.get("result", {}).get("protocol") == 1 for m in messages)
-            if direction == "receive":
-                assert not uploads, "receive-only mode uploaded local clipboard"
+            if direction == "receive" or (sensitive_case and not allow_sensitive):
+                assert not uploads, "disabled upload or sensitive policy uploaded local clipboard"
                 assert reads >= 1, "receive-only mode did not check remote clipboard"
             else:
                 assert len(uploads) == 1, f"unexpected upload count: {len(uploads)}"
@@ -188,7 +191,7 @@ exit 1
             assert any(m.get("event") == "activity" and m.get("data", {}).get("active") is True for m in messages)
             assert any(m.get("event") == "activity" and m.get("data", {}).get("active") is False for m in messages)
             with lock:
-                assert len(state["uploads"]) == (0 if direction == "receive" else 1)
+                assert len(state["uploads"]) == (0 if direction == "receive" or (sensitive_case and not allow_sensitive) else 1)
             daemon.stdin.write(b'{"id":3,"method":"shutdown"}\n')
             daemon.stdin.flush()
             assert daemon.wait(timeout=8) == 0
@@ -196,7 +199,7 @@ exit 1
             assert LOCAL.encode() not in logs and b"fixture-blocked" not in logs and b"fixture-password" not in logs
             if direction != "receive":
                 assert b'"filtered"' in logs
-            print(f"mocked TLS + fallback watcher + {direction} + pause + redacted logs: PASS")
+            print(f"mocked TLS + fallback watcher + {direction} + sensitive={allow_sensitive if sensitive_case else 'not-tested'} + pause + redacted logs: PASS")
         finally:
             if daemon.poll() is None:
                 daemon.kill()

@@ -109,7 +109,7 @@ exit 1
         config = root / 'config/omaclipsync/config.json'
         config.parent.mkdir(parents=True)
         config.write_text(json.dumps({'server': {'url': f'https://127.0.0.1:{server.server_port}',
-                                                'user': 'fixture', 'insecure': True},
+                                                'user': 'fixture', 'insecure': True, 'protocol': 'legacy'},
                                       'sync': {'intervalSec': 30}}))
         config.chmod(0o600)
         env = os.environ.copy()

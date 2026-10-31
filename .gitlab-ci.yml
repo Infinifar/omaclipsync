@@ -36,6 +36,8 @@ test:
     - python3 core/tests/mocked_e2e.py "$CARGO_TARGET_DIR/debug/syncclipd" --blacklist
     - python3 core/tests/mocked_e2e.py "$CARGO_TARGET_DIR/debug/syncclipd" --push-only
     - python3 core/tests/mocked_e2e.py "$CARGO_TARGET_DIR/debug/syncclipd" --receive-only
+    - python3 core/tests/mocked_e2e.py "$CARGO_TARGET_DIR/debug/syncclipd" --sensitive-off
+    - python3 core/tests/mocked_e2e.py "$CARGO_TARGET_DIR/debug/syncclipd" --sensitive-on
     - python3 core/tests/auth_recovery.py "$CARGO_TARGET_DIR/debug/syncclipd"
     - python3 core/tests/signalr_e2e.py "$CI_PROJECT_DIR/bin/syncclipd"
     - python3 core/tests/offline_recovery.py "$CARGO_TARGET_DIR/debug/syncclipd"
