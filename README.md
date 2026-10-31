@@ -1,6 +1,6 @@
 # Omaclipsync
 
-Version **0.2.1** is being prepared for local testing. See [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md). A GitHub release/tag has not been published.
+Version **0.2.1** is released. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.1), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
 
 English · [简体中文](README-ZH.md)
 

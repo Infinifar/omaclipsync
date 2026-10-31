@@ -1,6 +1,6 @@
 # Omaclipsync
 
-**0.2.1** 已准备为本地候选测试版，见 [改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。暂未发布 GitHub Release 或版本标签。
+**0.2.1** 已正式发布，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.1)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
 
 [English](README.md) · 简体中文
 
