@@ -1,0 +1,19 @@
+[package]
+name = "rustclipsync-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Shared RustClipSync client protocol, durable state and synchronization engine"
+readme = "README.md"
+repository = "https://github.com/Infinifar/rustclipsync-core"
+publish = false
+
+[dependencies]
+base64 = "0.22"
+regex = "1.12"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+url = "2"

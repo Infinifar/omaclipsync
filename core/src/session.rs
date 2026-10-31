@@ -40,18 +40,7 @@ pub enum SyncError {
     Remote(Error),
     Clipboard(wayland::ClipboardError),
 }
-#[derive(Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Uploaded,
-    Current,
-    Downloaded,
-    Skipped,
-    Filtered,
-    Paused,
-    Unsupported,
-    Invalid,
-    Capacity,
-}
+pub use rustclipsync_core::Outcome;
 
 pub struct Session<R, C> {
     pub engine: Engine,

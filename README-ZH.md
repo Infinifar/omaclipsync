@@ -1,5 +1,7 @@
 # Omaclipsync
 
+**0.2.1** 已准备为本地候选测试版，见 [改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。暂未发布 GitHub Release 或版本标签。
+
 [English](README.md) · 简体中文
 
 <p align="center">
@@ -193,6 +195,8 @@ omarchy plugin remove io.github.infinifar.omaclipsync
 回退到旧版本时，请先备份配置，并在启动旧版服务前从 JSON 配置中移除旧版不支持的字段（例如 `sync.allowSensitive`、`sync.direction` 或 `sync.notifyOnSuccess`）；旧版会拒绝未知配置字段。
 
 ## 从源码构建
+
+RustClipSync 同步逻辑在相邻的 `rustclipsync-core` 项目中统一维护。本仓库的 `core/vendor/rustclipsync-core` 是自动导出的源码快照，`UPSTREAM.json` 记录逐文件校验值，因此单独克隆插件也能编译。更新共享核心后运行 `bash scripts/sync-core.sh` 重新导出，增加 `--check` 可核对是否完全一致；不要直接编辑快照。既有状态文件名、密钥环账户和加密状态格式保持兼容。
 
 需要 Rust、Cargo、Clippy、`jq` 和 GNU `tar`；集成测试还需要 Python 3 和 OpenSSL。在源码目录运行：
 

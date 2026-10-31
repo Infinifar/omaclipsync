@@ -13,12 +13,7 @@ const MAX_FAVORITES: usize = 5;
 fn is_false(value: &bool) -> bool {
     !value
 }
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Direction {
-    Upload,
-    Download,
-}
+pub use rustclipsync_core::adapters::Direction;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
@@ -191,6 +186,13 @@ impl History {
     }
     pub fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+impl rustclipsync_core::adapters::HistorySink for History {
+    type Error = HistoryError;
+    fn record(&self, text: &str, direction: Direction, timestamp: u64) -> Result<(), Self::Error> {
+        History::record(self, text, direction, timestamp)
     }
 }
 

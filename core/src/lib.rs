@@ -1,9 +1,7 @@
 //! SyncClipboard text protocol primitives. No clipboard or network activity is
 //! started merely by loading this library.
-use regex::RegexSet;
 use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     io::Read,
@@ -17,7 +15,7 @@ pub mod v1_session;
 pub mod v1_state;
 pub mod v1_worker;
 
-pub const MAX_TEXT_BYTES: usize = 10 * 1024 * 1024;
+pub use rustclipsync_core::{hash, Error, Filter, FilterMode, MAX_TEXT_BYTES};
 const MAX_METADATA_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,10 +32,6 @@ pub struct Profile {
     pub transfer_data_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<usize>,
-}
-
-pub fn hash(text: &str) -> String {
-    format!("{:X}", Sha256::digest(text.as_bytes()))
 }
 
 /// Build a compatible text profile, preserving UTF-8 boundaries in the preview.
@@ -65,45 +59,6 @@ pub fn profile(text: &str, max_inline: usize) -> Result<Profile, &'static str> {
         // SyncClipboard's TextProfile.Size counts UTF-16 code units.
         size: Some(text.encode_utf16().count()),
     })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FilterMode {
-    Off,
-    Blacklist,
-    Whitelist,
-}
-pub struct Filter {
-    mode: FilterMode,
-    patterns: RegexSet,
-    downloads: bool,
-}
-impl Filter {
-    pub fn new(
-        mode: FilterMode,
-        patterns: &[String],
-        downloads: bool,
-    ) -> Result<Self, regex::Error> {
-        Ok(Self {
-            mode,
-            patterns: RegexSet::new(patterns)?,
-            downloads,
-        })
-    }
-    pub fn matches(&self, text: &str) -> bool {
-        self.patterns.is_match(text)
-    }
-    pub fn allows(&self, text: &str, download: bool) -> bool {
-        if download && !self.downloads {
-            return true;
-        }
-        let matched = self.patterns.is_match(text);
-        match self.mode {
-            FilterMode::Off => true,
-            FilterMode::Blacklist => !matched,
-            FilterMode::Whitelist => matched,
-        }
-    }
 }
 
 /// Deduplication remembers only successful clipboard writes.
@@ -157,34 +112,6 @@ impl Dedupe {
                 self.seen.insert(digest, now);
             }
         }
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    InvalidUrl,
-    Http(reqwest::Error),
-    Io(std::io::Error),
-    Json(serde_json::Error),
-    Status(u16),
-    TooLarge,
-    InvalidProfile,
-    HashMismatch,
-    Filtered,
-}
-impl From<reqwest::Error> for Error {
-    fn from(e: reqwest::Error) -> Self {
-        Self::Http(e)
-    }
-}
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
     }
 }
 

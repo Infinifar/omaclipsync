@@ -81,12 +81,7 @@ impl Drop for Permit<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Event {
-    Connected,
-    Changed,
-    Disconnected,
-}
+pub use rustclipsync_core::worker::Event;
 
 pub struct Worker {
     stop: Arc<AtomicBool>,

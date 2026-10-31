@@ -7,6 +7,14 @@ use std::{
 };
 
 pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_private_impl(path, bytes, true)
+}
+
+pub(crate) fn write_private_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_private_impl(path, bytes, false)
+}
+
+fn write_private_impl(path: &Path, bytes: &[u8], newline: bool) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing parent"))?;
@@ -36,7 +44,9 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     })?;
     let result = (|| {
         file.write_all(bytes)?;
-        file.write_all(b"\n")?;
+        if newline {
+            file.write_all(b"\n")?;
+        }
         file.sync_all()?;
         fs::rename(&tmp, path)
     })();

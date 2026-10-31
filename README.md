@@ -1,5 +1,7 @@
 # Omaclipsync
 
+Version **0.2.1** is being prepared for local testing. See [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md). A GitHub release/tag has not been published.
+
 English · [简体中文](README-ZH.md)
 
 <p align="center">
@@ -193,6 +195,8 @@ Uninstalling the plugin does not automatically delete configuration, history, lo
 When rolling back, back up the configuration and remove fields unsupported by the older daemon (such as `sync.allowSensitive`, `sync.direction`, or `sync.notifyOnSuccess`) before starting it; older builds reject unknown configuration fields.
 
 ## Build from source
+
+The RustClipSync engine is maintained in the sibling `rustclipsync-core` project. This checkout contains an automatically exported source snapshot in `core/vendor/rustclipsync-core`, with file hashes in `UPSTREAM.json`, so standalone builds do not require a sibling checkout. To update it from the shared project, run `bash scripts/sync-core.sh`; use `--check` to verify an exact match. Do not edit the generated copy. State filenames, Secret Service accounts and the encrypted state format are preserved.
 
 Requires Rust, Cargo, Clippy, `jq`, and GNU `tar`; integration tests also require Python 3 and OpenSSL. From the repository root:
 

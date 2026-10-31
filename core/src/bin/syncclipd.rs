@@ -346,7 +346,7 @@ impl App {
                 Arc::clone(&self.clipboard_serial),
             ) {
                 Ok(session) => self.v1 = Some(session),
-                Err(V1Error::Keyring) => {
+                Err(V1Error::Credentials) => {
                     self.session = None;
                     self.state = "credentials";
                     self.stop_watcher();
@@ -765,7 +765,7 @@ impl App {
 
     fn v1_failure(&mut self, error: V1Error) {
         self.state = match error {
-            V1Error::Remote(Error::Status(401 | 403)) | V1Error::Keyring => "credentials",
+            V1Error::Remote(Error::Status(401 | 403)) | V1Error::Credentials => "credentials",
             V1Error::Remote(Error::Status(409)) | V1Error::Conflict => {
                 self.v1_conflict = true;
                 "conflict"
@@ -1069,7 +1069,7 @@ impl App {
                             self.note_outcome(&outcome);
                             Ok(json!({"outcome":outcome_name(&outcome)}))
                         }
-                        Err(V1Error::Clipboard(wayland::ClipboardError::Sensitive)) => {
+                        Err(V1Error::Clipboard(v1_session::ClipboardError::Sensitive)) => {
                             Err("sensitive_blocked")
                         }
                         Err(error) => {

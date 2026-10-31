@@ -1,5 +1,7 @@
 # Third-party licenses
 
+Shared client engine: rustclipsync-core 0.1.0 (MIT), derived from Infinifar/omaclipsync. The generated source snapshot includes its [license](core/vendor/rustclipsync-core/LICENSE) and [provenance and checksums](core/vendor/rustclipsync-core/UPSTREAM.json).
+
 The bundled Linux x86_64 binaries include dependencies from the locked Cargo graph.
 The following lists the normal and build dependencies and the license/notice files
 distributed with each crate. Files are deduplicated by SHA-256.
