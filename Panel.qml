@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui as Ui
+import "Inbox.js" as Inbox
 
 Ui.Panel {
   id: root
@@ -33,7 +34,45 @@ Ui.Panel {
   property string pendingAccount: ""
   property string formError: ""
   property string testResult: ""
+  property var inboxView: Inbox.empty()
+  property int inboxReadRequestId: 0
+  property int inboxActionRequestId: 0
+  property string inboxActionItemId: ""
+  property string inboxFeedback: ""
+  readonly property var inboxMeta: service && service.status ? service.status.inbox || null : null
+  readonly property string inboxId: inboxMeta ? String(inboxMeta.id || "") : ""
+  readonly property int historyActionIndex: inboxId ? 9 : 6
   property int actionIndex: 0
+  onInboxIdChanged: { hideInbox(); if (!historyMode) actionIndex = 0 }
+  onOpenedChanged: { if (!opened) hideInbox() }
+  onEditingChanged: { if (editing) hideInbox() }
+  onHistoryModeChanged: { if (historyMode) hideInbox() }
+  onServiceChanged: hideInbox()
+
+  function hideInbox() {
+    inboxReadRequestId = 0
+    inboxView = Inbox.empty()
+    inboxFeedback = ""
+  }
+  function toggleInbox() {
+    if (inboxView.revealed || inboxView.loading) { hideInbox(); return }
+    if (!inboxId || !service || !service.ready) return
+    inboxFeedback = ""
+    inboxView = Inbox.begin(inboxId)
+    readInboxChunk()
+  }
+  function readInboxChunk() {
+    if (!opened || editing || historyMode || !service || !service.ready || inboxView.id !== inboxId) { hideInbox(); return }
+    inboxReadRequestId = service.request("read_inbox", {id: inboxId, offset: inboxView.offset}) || 0
+    if (!inboxReadRequestId) { hideInbox(); inboxFeedback = "inbox_failed" }
+  }
+  function inboxAction(method) {
+    if (!inboxId || !service || !service.ready || inboxActionRequestId) return
+    hideInbox()
+    inboxActionItemId = inboxId
+    inboxActionRequestId = service.request(method, {id: inboxId}) || 0
+    if (!inboxActionRequestId) inboxFeedback = "inbox_failed"
+  }
   readonly property var identity: hostWidget || root
   readonly property var barApi: bar
   readonly property var fontTokens: Style.font
@@ -119,14 +158,36 @@ Ui.Panel {
     else if (actionIndex === 3) setDirection("push")
     else if (actionIndex === 4) setDirection("receive")
     else if (actionIndex === 5) setDirection("both")
-    else if (actionIndex === 6) showHistory()
-    else if (actionIndex === 7) startEditing()
+    else if (inboxId && actionIndex === 6) toggleInbox()
+    else if (inboxId && actionIndex === 7) inboxAction("copy_inbox")
+    else if (inboxId && actionIndex === 8) inboxAction("clear_inbox")
+    else if (actionIndex === historyActionIndex) showHistory()
+    else if (actionIndex === historyActionIndex + 1) startEditing()
   }
   Connections {
     target: root.service
     ignoreUnknownSignals: true
-    function onReadyChanged() { if (!root.service.ready) root.directionRequestId = 0 }
+    function onReadyChanged() {
+      if (!root.service.ready) { root.directionRequestId = 0; root.inboxActionRequestId = 0; root.hideInbox() }
+    }
+    function onConfigChanged() { root.hideInbox() }
+    function onStatusChanged() { if (["offline", "credentials", "re_pair", "daemon_stopped", "config_error"].indexOf(root.syncState) >= 0) root.hideInbox() }
     function onReplied(id, method, ok, result, error) {
+      if (method === "read_inbox" && id === root.inboxReadRequestId) {
+        root.inboxReadRequestId = 0
+        let next = ok && root.inboxView.id === root.inboxId ? Inbox.append(root.inboxView, result) : null
+        if (!next) { root.hideInbox(); root.inboxFeedback = error === "inbox_stale" ? "inbox_stale" : "inbox_failed"; return }
+        root.inboxView = next
+        if (next.loading) root.readInboxChunk()
+        return
+      }
+      if ((method === "copy_inbox" || method === "clear_inbox") && id === root.inboxActionRequestId) {
+        root.inboxActionRequestId = 0
+        if (root.inboxActionItemId !== root.inboxId) return
+        root.inboxFeedback = ok ? (method === "copy_inbox" ? "inbox_copied" : "") : (error === "inbox_stale" ? "inbox_stale" : "inbox_failed")
+        if (method === "clear_inbox" || error === "inbox_stale") root.service.request("status")
+        return
+      }
       if (method === "set_direction" && id === root.directionRequestId) {
         root.directionRequestId = 0
       } else if (method === "copy_history" && id === root.copyRequestId) {
@@ -194,6 +255,7 @@ Ui.Panel {
       property bool historyEnabled: false
       property bool notifyOnSuccess: true
       property bool allowSensitive: false
+      property bool autoApplySensitive: false
       property bool showIcon: true
       property bool insecure: false
       property int intervalValue: 60
@@ -210,6 +272,7 @@ Ui.Panel {
         blockDownloads = filter.alsoBlockDownloads === true; historyEnabled = history.enabled === true
         notifyOnSuccess = sync.notifyOnSuccess !== false
         allowSensitive = sync.allowSensitive === true
+        autoApplySensitive = sync.autoApplySensitive !== false
         showIcon = root.hostWidget ? root.hostWidget.iconShown : true
         historyLimit = Number(history.limit || 50); dedupeValue = dedupe.windowSec === undefined ? 300 : Number(dedupe.windowSec)
         insecure = server.insecure === true; testField.text = ""
@@ -220,7 +283,7 @@ Ui.Panel {
         var old = root.service.config || ({})
         var config = {
           server: {url: urlField.text.trim(), user: userField.text.trim(), insecure: insecure, protocol: old.server ? old.server.protocol || "v1" : "v1"},
-          sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768, notifyOnSuccess: notifyOnSuccess, direction: old.sync ? old.sync.direction || "both" : "both", allowSensitive: allowSensitive},
+          sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768, notifyOnSuccess: notifyOnSuccess, direction: old.sync ? old.sync.direction || "both" : "both", allowSensitive: allowSensitive, autoApplySensitive: autoApplySensitive},
           filter: filterConfig(), history: {enabled: historyEnabled, limit: historyLimit},
           dedupe: {windowSec: dedupeValue}, logging: old.logging || {level: "info"}
         }
@@ -231,7 +294,7 @@ Ui.Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onMoveRequested: function(dx, dy) {
-        root.actionIndex = Math.max(0, Math.min(root.historyMode ? 2 + 3 * (root.service ? root.service.history.length : 0) + (root.service && root.service.config.history && root.service.config.history.enabled ? 1 : 0) : 7, root.actionIndex + (dx || dy)))
+        root.actionIndex = Math.max(0, Math.min(root.historyMode ? 2 + 3 * (root.service ? root.service.history.length : 0) + (root.service && root.service.config.history && root.service.config.history.enabled ? 1 : 0) : root.historyActionIndex + 1, root.actionIndex + (dx || dy)))
         if (root.historyMode && root.actionIndex >= 3 && root.service) {
           let target = root.actionIndex === 3 + 3 * root.service.history.length ? clearHistoryButton : historyRepeater.itemAt(Math.floor((root.actionIndex - 3) / 3))
           if (target && target.visible) {
@@ -239,7 +302,12 @@ Ui.Panel {
             if (top < scroll.contentY) scroll.contentY = Math.max(0, top)
             else if (top + target.height > scroll.contentY + scroll.height) scroll.contentY = Math.min(scroll.contentHeight - scroll.height, top + target.height - scroll.height)
           }
-        } else if (root.historyMode) scroll.contentY = 0
+        } else if (!root.historyMode && root.actionIndex >= 6) {
+          let target = root.actionIndex >= root.historyActionIndex ? historyNavigation : root.actionIndex === 6 ? revealInboxButton : root.actionIndex === 7 ? copyInboxButton : deleteInboxButton
+          let top = target.mapToItem(body, 0, 0).y
+          if (top < scroll.contentY) scroll.contentY = Math.max(0, top)
+          else if (top + target.height > scroll.contentY + scroll.height) scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, top + target.height - scroll.height))
+        } else scroll.contentY = 0
       }
       onActivateRequested: root.activateAction()
       Flickable {
@@ -316,10 +384,71 @@ Ui.Panel {
               Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("direction_receive"); bordered: true; selected: root.syncDirection === "receive"; focusable: true; hasCursor: root.actionIndex === 4 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady && !root.directionRequestId; onClicked: root.setDirection("receive") }
               Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("direction_both"); bordered: true; selected: root.syncDirection === "both"; focusable: true; hasCursor: root.actionIndex === 5 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady && !root.directionRequestId; onClicked: root.setDirection("both") }
             }
+            Column {
+              id: inboxSection
+              width: parent.width; spacing: Style.space(6)
+              Ui.PanelSectionHeader { width: parent.width; text: strings.t("inbox_title"); foreground: root.foreground }
+              Text {
+                visible: !root.inboxId
+                width: parent.width; textFormat: Text.PlainText
+                text: strings.t("inbox_empty")
+                color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall
+              }
+              Text {
+                visible: !root.inboxId && !!root.service && !!root.service.config.sync && root.service.config.sync.allowSensitive === true && root.service.config.sync.autoApplySensitive === true
+                width: parent.width; textFormat: Text.PlainText; wrapMode: Text.Wrap
+                text: strings.t("inbox_auto_note")
+                color: Qt.darker(root.foreground, 1.4); font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall
+              }
+              Row {
+                visible: !!root.inboxId
+                width: parent.width; spacing: Style.space(8)
+                Text {
+                  width: Math.max(0, parent.width - revealInboxButton.width - parent.spacing)
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; maximumLineCount: 4; elide: Text.ElideRight
+                  text: root.inboxView.revealed ? root.inboxView.text : "••••••••"
+                  color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.body
+                }
+                Ui.Button {
+                  id: revealInboxButton
+                  text: strings.t(root.inboxView.loading ? "cancel" : root.inboxView.revealed ? "inbox_hide" : "inbox_show")
+                  focusable: true; bordered: true; hasCursor: root.actionIndex === 6 && keyCatcher.activeFocus
+                  enabled: !!root.service && root.service.ready
+                  onClicked: root.toggleInbox()
+                }
+              }
+              Text {
+                visible: !!root.inboxId
+                width: parent.width; textFormat: Text.PlainText
+                text: strings.t("inbox_received_at").arg(root.inboxMeta ? new Date(Number(root.inboxMeta.receivedAt) * 1000).toLocaleString(Qt.locale(Commons.I18n.formatLocale), Locale.ShortFormat) : "")
+                color: Qt.darker(root.foreground, 1.4); font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap
+              }
+              Text {
+                visible: root.inboxView.loading || root.inboxView.truncated
+                width: parent.width; textFormat: Text.PlainText; wrapMode: Text.Wrap
+                text: strings.t(root.inboxView.loading ? "inbox_loading" : "inbox_truncated")
+                color: Qt.darker(root.foreground, 1.4); font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall
+              }
+              Row {
+                visible: !!root.inboxId
+                width: parent.width; spacing: Style.space(4)
+                Ui.Button { id: copyInboxButton; width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("inbox_copy"); bordered: true; focusable: true; hasCursor: root.actionIndex === 7 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && !root.inboxActionRequestId; onClicked: root.inboxAction("copy_inbox") }
+                Ui.Button { id: deleteInboxButton; width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("inbox_delete"); bordered: true; focusable: true; hasCursor: root.actionIndex === 8 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && !root.inboxActionRequestId; onClicked: root.inboxAction("clear_inbox") }
+              }
+              Text {
+                visible: root.inboxFeedback !== ""
+                width: parent.width; textFormat: Text.PlainText; wrapMode: Text.Wrap
+                text: root.inboxFeedback ? strings.t(root.inboxFeedback) : ""
+                color: root.inboxFeedback === "inbox_copied" ? root.foreground : Commons.Color.urgent
+                font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall
+              }
+            }
             Row {
+              id: historyNavigation
               width: parent.width; spacing: Style.space(4)
-              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("open_history"); bordered: true; focusable: true; hasCursor: root.actionIndex === 6 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.showHistory() }
-              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("settings"); bordered: true; focusable: true; hasCursor: root.actionIndex === 7 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady; onClicked: root.startEditing() }
+              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("open_history"); bordered: true; focusable: true; hasCursor: root.actionIndex === root.historyActionIndex && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.showHistory() }
+              Ui.Button { width: Math.max(0, (parent.width - parent.spacing) / 2); text: strings.t("settings"); bordered: true; focusable: true; hasCursor: root.actionIndex === root.historyActionIndex + 1 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.service.configReady; onClicked: root.startEditing() }
             }
           }
           Ui.PanelSectionHeader { visible: root.historyMode && !root.editing; width: parent.width; text: strings.t("history"); foreground: root.foreground }
@@ -383,6 +512,7 @@ Ui.Panel {
             Text { textFormat: Text.PlainText; text: strings.t("password"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }
             Ui.TextField { id: passwordField; width: parent.width; password: true; placeholderText: strings.t("password_hint") }
             Ui.Toggle { width: parent.width; label: strings.t("allow_sensitive"); description: strings.t("allow_sensitive_note"); checked: keyCatcher.allowSensitive; onClicked: keyCatcher.allowSensitive = !keyCatcher.allowSensitive }
+            Ui.Toggle { visible: keyCatcher.allowSensitive; width: parent.width; label: strings.t("auto_apply_sensitive"); description: strings.t("auto_apply_sensitive_note"); checked: keyCatcher.autoApplySensitive; onClicked: keyCatcher.autoApplySensitive = !keyCatcher.autoApplySensitive }
             Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("interval"); from: 30; to: 300; value: keyCatcher.intervalValue; onModified: function(v) { keyCatcher.intervalValue = v } }
             Ui.Dropdown {
               width: parent.width; label: strings.t("filter"); value: keyCatcher.filterValue

@@ -34,7 +34,7 @@ Item {
 
   function notifySuccess(outcome) {
     if (!ready) return
-    if (outcome !== "uploaded" && outcome !== "downloaded") return
+    if (outcome !== "uploaded" && outcome !== "downloaded" && outcome !== "stored") return
     notify(strings.t(outcome === "uploaded" ? "notify_pushed" : "notify_received"))
   }
   function notify(message) {

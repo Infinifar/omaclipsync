@@ -43,6 +43,12 @@ pub struct SyncConfig {
     pub notify_on_success: bool,
     pub direction: SyncDirection,
     pub allow_sensitive: bool,
+    // Saved configurations predating the inbox retain automatic reception.
+    #[serde(default = "legacy_auto_apply_sensitive")]
+    pub auto_apply_sensitive: bool,
+}
+fn legacy_auto_apply_sensitive() -> bool {
+    true
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -69,6 +75,7 @@ impl Default for SyncConfig {
             notify_on_success: true,
             direction: SyncDirection::Both,
             allow_sensitive: false,
+            auto_apply_sensitive: false,
         }
     }
 }
@@ -239,6 +246,12 @@ mod tests {
         assert!(old.sync.notify_on_success);
         assert!(!cfg.sync.allow_sensitive);
         assert!(!old.sync.allow_sensitive);
+        assert!(!cfg.sync.auto_apply_sensitive);
+        assert!(old.sync.auto_apply_sensitive);
+        let explicit: Config =
+            serde_json::from_str(r#"{"sync":{"allowSensitive":true,"autoApplySensitive":false}}"#)
+                .unwrap();
+        assert!(!explicit.sync.auto_apply_sensitive);
         assert_eq!(old.sync.direction, SyncDirection::Both);
         assert!(serde_json::from_str::<Config>(r#"{"sync":{"direction":"invalid"}}"#).is_err());
         cfg.server.url = "https://example.org/base".into();

@@ -1,19 +1,19 @@
 {
   "source": "rustclipsync-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "extracted_from": "Infinifar/omaclipsync@a8c330136886ad547dfadf386bb66901b3bbc45c",
   "files": {
-    "Cargo.toml": "5b91ff8fa5fd05b29fe248a71d72c8f5dbc35782d81b9351c958ac0a7de112cb",
+    "Cargo.toml": "df762167e355ac94bcff66caed28c4ea6a648a43fcf2545393d62e228b2e86b1",
     "LICENSE": "e2a1c93da3bd7ecef573b225d7f159213fc89440b22487d1930b4c58a99bf84c",
-    "README.md": "2b3d2e69777425eb693675835aaff80e40ecd6eef53f0661724013f6f73dac3b",
-    "VALIDATION.md": "985c2e9de243066c3f79757d52f19f174d877ce2b0ee2c5af78cd5496f0fc735",
-    "src/adapters.rs": "135cd1c129cf44a83e2e1a353d4aacb496526a27e8a729512176092704a7e1fb",
+    "README.md": "1fd73e90c769a0e288ee7189efb732c27011b375da6775d7e4207f4cc1bd8776",
+    "VALIDATION.md": "83bc52dd12cdd0c49010ca781d1f6c4f227b6f10ff4d6b7b2897f396e972243a",
+    "src/adapters.rs": "fe4a1c01ec360046f4454dab31a8a457273cbef2c4e4cbe9673d1cbd279032c1",
     "src/client.rs": "1438c864ac46c902484917718359524554d79a51a0dbaf82bcdac691b032bd02",
     "src/error.rs": "32e177da7a3e4e34e6859d2c93bdb5f81589253ea981711c3c365a0c0cb0ffa1",
     "src/filter.rs": "10444993546bc3164f2a103e7e4198b873c1363e7b19aba92aac518d531b7a16",
-    "src/lib.rs": "06f91aa4ff7bc4efa300f66b386f694d6d5fcf12cb126bdbe95617cd138b5330",
-    "src/session.rs": "245bb6c5bea8f385ee56ad9372981d171251cfda1c40127a3e945104e18c8c4d",
-    "src/state.rs": "a3dc9e5a7d5aa63fb3989fa17439a77b6c58229b17e1a8f69ffad45c90c7de59",
+    "src/lib.rs": "f5146a5e8321a6478252c6c474446889340221b321c68f025b12d37f3343399b",
+    "src/session.rs": "4e355facc09ccc41aba2c4a6fe676527016bb7fa740c246f373bf5f989359205",
+    "src/state.rs": "0fb673c9ab87aa41c0ddd914ccb4f3ac2bcc076a6c8e832d339d635e0fe63251",
     "src/transport.rs": "d404bfd2a79f36ebfd21f7ee0fedd672ac848a263edc10f1fd7f847158e04807",
     "src/worker.rs": "6651dc40e753659a7adeaa4f54dd77292475ff4dfbbc1bc7b71796472ddbde6e"
   }

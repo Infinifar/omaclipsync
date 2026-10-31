@@ -194,12 +194,45 @@ impl rustclipsync_core::adapters::HistorySink for History {
     fn record(&self, text: &str, direction: Direction, timestamp: u64) -> Result<(), Self::Error> {
         History::record(self, text, direction, timestamp)
     }
+    fn record_marked(
+        &self,
+        text: &str,
+        direction: Direction,
+        timestamp: u64,
+        sensitive: bool,
+    ) -> Result<(), Self::Error> {
+        if sensitive {
+            return Ok(());
+        }
+        self.record(text, direction, timestamp)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{fs, os::unix::fs::PermissionsExt};
+    #[test]
+    fn marked_uploads_and_downloads_never_enter_ordinary_history() {
+        use rustclipsync_core::adapters::HistorySink;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        let history = History::new(&path, true, 50).unwrap();
+        history
+            .record_marked("sensitive fixture", Direction::Upload, 1, true)
+            .unwrap();
+        history
+            .record_marked("sensitive fixture", Direction::Download, 2, true)
+            .unwrap();
+        assert!(!path.exists());
+        history
+            .record_marked("ordinary fixture", Direction::Download, 3, false)
+            .unwrap();
+        assert_eq!(history.load().unwrap().len(), 1);
+        assert!(!fs::read_to_string(path)
+            .unwrap()
+            .contains("sensitive fixture"));
+    }
     #[test]
     fn disabled_never_reads_or_writes() {
         let dir = tempfile::tempdir().unwrap();

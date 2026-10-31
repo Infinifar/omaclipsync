@@ -667,6 +667,7 @@ mod tests {
 pub mod config;
 pub mod engine;
 pub mod history;
+pub mod inbox;
 pub mod keyring;
 pub mod logging;
 pub mod protocol;

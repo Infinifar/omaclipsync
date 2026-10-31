@@ -56,6 +56,7 @@ mod tests {
             server: "https://example.test".into(),
             token: random_token().unwrap(),
             paired: false,
+            inbox: None,
             state: State::new(String::new(), random_uuid().unwrap(), 0),
         };
         save(&path, &key, &value).unwrap();

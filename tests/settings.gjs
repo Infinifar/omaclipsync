@@ -25,3 +25,5 @@ assert(!api.inlineSame({}, {id:"plugin", showIcon:true}), "missing setting must 
 const reflected = api.inlineEntry("plugin", {showIcon:false, futureOption:"keep"}, original)
 assert(reflected.showIcon === false && reflected.futureOption === "keep" && reflected.refreshIntervalSec === 30, "config reflection must retain hidden state")
 assert(!Object.prototype.hasOwnProperty.call(api.merge(original, {}), "showIcon"), "icon visibility must not enter daemon config")
+
+assert(api.merge({sync:{allowSensitive:true,autoApplySensitive:false},filter:{},history:{}},{refreshIntervalSec:90}).sync.autoApplySensitive === false, "unrelated settings must preserve inbox reception")

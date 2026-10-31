@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::MAX_TEXT_BYTES;
 
 const MAGIC: &[u8; 4] = b"RCS1";
-pub const MAX_STATE: u64 = 32 * 1024 * 1024;
+pub const MAX_STATE: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -224,6 +224,24 @@ impl State {
     }
 }
 
+/// A deliberately un-applied incoming item, committed with its receive cursor.
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InboxItem {
+    pub id: String,
+    #[serde(with = "base64_text")]
+    pub text: String,
+    pub received_at: u64,
+}
+impl std::fmt::Debug for InboxItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InboxItem")
+            .field("id", &self.id)
+            .field("text", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Persisted {
@@ -231,12 +249,15 @@ pub struct Persisted {
     pub token: String,
     pub paired: bool,
     pub state: State,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox: Option<InboxItem>,
 }
 
 impl Persisted {
     /// Long polling only needs device identity and cursor, never clipboard text.
     pub fn notification_identity(&self) -> Self {
         Self {
+            inbox: None,
             server: self.server.clone(),
             token: self.token.clone(),
             paired: self.paired,
@@ -427,6 +448,7 @@ mod tests {
             token: random_token().unwrap(),
             paired: true,
             state: s,
+            inbox: None,
         };
         let raw = seal(&key, &saved).unwrap();
         assert_eq!(&raw[..4], b"RCS1");

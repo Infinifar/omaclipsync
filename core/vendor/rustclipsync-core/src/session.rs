@@ -12,7 +12,7 @@ use std::{
 use crate::{
     adapters::{Clipboard, ClipboardError, Direction, HistorySink, StateStore},
     client::Client,
-    state::{self, Ack, LocalCopy, Persisted, State},
+    state::{self, Ack, InboxItem, LocalCopy, Persisted, State},
     transport::Transport,
     Error, Filter, Outcome, MAX_TEXT_BYTES,
 };
@@ -66,6 +66,7 @@ pub struct Session<C, S, H, R = Client> {
     generation: Arc<AtomicU64>,
     echo: Option<(String, Instant)>,
     needs_pending_check: bool,
+    sensitive_inbox: bool,
 }
 
 impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H, R> {
@@ -90,6 +91,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
                     server: server.clone(),
                     token: state::random_token()?,
                     paired: false,
+                    inbox: None,
                     state: State::new(String::new(), state::random_uuid()?, 0),
                 };
                 storage.save(&state::seal(&key, &value)?)?;
@@ -117,7 +119,31 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
             generation,
             echo: None,
             needs_pending_check,
+            sensitive_inbox: false,
         })
+    }
+
+    /// Opt in to retaining sensitive receives in encrypted session state, never
+    /// presenting a private inbox as a successful OS clipboard write.
+    pub fn use_sensitive_inbox(&mut self, enabled: bool) {
+        self.sensitive_inbox = enabled;
+    }
+    pub fn update_policy(&mut self, filter: Filter, allow_sensitive: bool) {
+        self.filter = filter;
+        self.allow_sensitive = allow_sensitive;
+    }
+    pub fn clear_inbox(&mut self, id: &str) -> Result<bool, SyncError> {
+        if self
+            .persisted
+            .inbox
+            .as_ref()
+            .is_none_or(|item| item.id != id)
+        {
+            return Ok(false);
+        }
+        self.persisted.inbox = None;
+        self.save()?;
+        Ok(true)
     }
 
     fn save(&self) -> Result<(), SyncError> {
@@ -235,6 +261,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         self.persisted.token = state::random_token()?;
         self.persisted.state = State::new(String::new(), state::random_uuid()?, 0);
         self.persisted.paired = false;
+        self.persisted.inbox = None;
         self.needs_pending_check = false;
         self.echo = None;
         self.save()?;
@@ -400,7 +427,11 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
             .committed(&request.copy.id, revision)
             .map_err(invalid_state)?;
         self.save()?;
-        self.record_history(&request.copy.text, Direction::Upload);
+        self.record_history(
+            &request.copy.text,
+            Direction::Upload,
+            request.copy.sensitive,
+        );
         Ok(Outcome::Uploaded)
     }
 
@@ -480,6 +511,21 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         {
             return Ok(Outcome::Skipped);
         }
+        if message.sensitive && self.sensitive_inbox {
+            self.persisted.inbox = Some(InboxItem {
+                id: message.id.clone(),
+                text,
+                received_at: unix_time(),
+            });
+            self.persisted.state.cursor = message.revision;
+            self.persisted.state.ack = Some(Ack {
+                id: message.id,
+                revision: message.revision,
+                result: "skipped".into(),
+            });
+            self.save()?;
+            return Ok(Outcome::Stored);
+        }
         self.persisted
             .state
             .prepare_apply(message.clone())
@@ -510,12 +556,15 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
             .finish_apply(&message.id, true)
             .map_err(invalid_state)?;
         self.save()?;
-        self.record_history(&text, Direction::Download);
+        self.record_history(&text, Direction::Download, message.sensitive);
         Ok(Outcome::Downloaded)
     }
 
-    fn record_history(&mut self, text: &str, direction: Direction) {
-        self.history_error = self.history.record(text, direction, unix_time()).is_err();
+    fn record_history(&mut self, text: &str, direction: Direction, sensitive: bool) {
+        self.history_error = self
+            .history
+            .record_marked(text, direction, unix_time(), sensitive)
+            .is_err();
     }
 }
 

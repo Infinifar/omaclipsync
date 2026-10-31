@@ -74,3 +74,9 @@ python3 tools/export_source.py ../omarchy-plugins-dev/io.github.infinifar.omacli
 Windows 方案在相邻的 `rustclipsync-destop` 项目中；Android 现阶段继续使用 Kotlin 实现同一协议，不强行加入 JNI。
 
 MIT 许可，原始实现来源：`Infinifar/omaclipsync`，提取基线提交 `a8c330136886ad547dfadf386bb66901b3bbc45c`。新增的跨平台接口、测试和导出工具在本项目维护。
+
+## 0.2.0：私有敏感收件项
+
+客户端可调用 `Session::use_sensitive_inbox(true)`：启用敏感同步时，收到的敏感正文与接收游标在同一次加密状态提交中保存，确认使用 `skipped`，不声称已经写入系统剪贴板。只保留最后一项；`clear_inbox(id)` 不重置游标。默认接收行为不变。`HistorySink::record_marked` 允许平台将敏感正文排除出普通历史；通知身份不携带收件正文。
+
+新增 `Persisted.inbox` 字段，旧加密文件默认读取为空；状态上限调整为 64 MiB，以容纳最坏情况下的待发送项、替换项和私有收件项。该 Rust API 变更以 crate 0.2.0 发布，服务端 HTTP 协议不变。Omaclipsync 0.2.1 仍使用自己的 0.1.0 源码快照。

@@ -1,6 +1,6 @@
 # Omaclipsync
 
-**0.2.1** 已正式发布，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.1)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
+**0.2.2** 新增加密敏感收件区，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.2)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
 
 [English](README.md) · 简体中文
 
@@ -15,10 +15,20 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 旧协议版本的历史性能数据不适用于当前实现；实际桌面资源占用尚需单独测量。
 
 <p align="center">
-  <img src="preview.png" alt="Omaclipsync 主面板">
+  <img src="preview.png" alt="Omaclipsync 0.2.2 主面板" width="578">
 </p>
 
-截图来自实际运行的插件；服务器地址和最近同步时间已为保护隐私而遮盖。
+截图来自实际运行的 Omarchy 插件，服务器信息和最近同步时间已遮盖；下方显示的正文仅为无敏感信息的测试文本。
+
+<p align="center"><strong>敏感收件区：默认遮罩</strong><br>
+  <img src="assets/screenshots/inbox-masked.png" alt="默认隐藏正文的敏感收件区" width="578">
+</p>
+<p align="center"><strong>手动显示：仅使用测试文本</strong><br>
+  <img src="assets/screenshots/inbox-revealed.png" alt="显示无敏感测试文本的收件区" width="578">
+</p>
+<p align="center"><strong>接收方式设置</strong><br>
+  <img src="assets/screenshots/receive-mode.png" alt="允许敏感同步开启、自动写入剪贴板关闭" width="578">
+</p>
 
 ## 特点
 
@@ -28,7 +38,7 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 - **同步方向**：主面板可选单向推送、单向接收或双向自动同步（默认）。任何模式下都可手动推送和接收；暂停会停止自动同步。
 - **可选的本地历史**：默认关闭，可浏览、复制、粘贴和收藏最多 5 条；收藏置顶，清空普通历史时保留。启用后内容以明文保存在本机，也可以使用系统剪贴板历史代替。
 - **同步通知**：默认开启，可在设置中关闭。成功推送或接收新文本时显示通知，不包含剪贴板正文；内容未变化或同步失败时不提示成功。
-- **敏感内容策略**：默认不推送密码管理器标记的内容，可在设置中开启；自动同步和手动推送均遵循该设置。
+- **敏感内容策略与收件区**：默认不推送或接收应用标记的敏感内容。开启后可选择仅存入加密收件区，或自动写入系统剪贴板；收件区只保留最新一条，默认遮罩，提供显示、收到时间、复制和删除。普通历史不再新增敏感正文。
 - **过滤与去重**：支持正则黑名单、白名单和可选的接收过滤；按消息 ID 与每台设备的持久游标避免重试和通知造成重复写入。相同文本的不同复制事件仍可同步。
 
 如果通知没有弹出，可以运行 `omarchy shell notifications isDnd` 检查 Omarchy 的勿扰模式。在 Omarchy 4.5.0 RC 中，开启勿扰时通知会保留在通知历史中，但不会弹窗。可在 Omarchy 中关闭勿扰，或运行 `omarchy shell notifications setDnd off` 恢复弹窗。
@@ -112,6 +122,17 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 3. 首次配对从服务端当前版本开始，不覆盖旧的本地内容；启动时已有的本机剪贴板也不会自动推送。离线期间只追上最新内容，本地待发送内容与远端冲突时不会静默覆盖；确认后点击 **推送** 可选择当前本地剪贴板。面板也提供 **接收** 和 **暂停**。
 4. 在设置中按需启用历史和过滤。选择历史条目会改变系统剪贴板，开启同步时可能被推送到服务器。粘贴会向打开历史前的应用发送 Shift+Insert；如果原窗口不可用，则仅复制并提示。
 
+### 敏感收件区
+
+在设置中开启 **允许同步敏感内容**，再通过 **自动写入收到的敏感内容** 选择接收方式：
+
+- **关闭自动写入**：收到的敏感文本只存入本机加密收件区，不改系统剪贴板。新配置默认采用此方式；新条目替换上一条，普通文本不会清空收件区，关闭本地历史也可使用。
+- **开启自动写入**：新的敏感文本直接写入系统剪贴板，保留敏感标记，不另存收件区或普通历史。旧配置缺少新字段时保留原有自动写入行为；升级后可手动关闭。切换方式不会补写、清除已有收件项或重置设备身份和游标。
+
+收件区位于主页同步方向下方，历史和设置入口仍在最后一栏。正文默认遮罩，点击右侧 **显示** 才读取；关闭面板、进入其他页面、后台断开或收到新条目时重新隐藏。预览最多读取并显示开头 64 KiB，面板最多显示四行；**复制到剪贴板** 始终由 Rust 复制完整原文并携带敏感标记，不触发自动重复推送。收到时间使用当前系统语言和本机时区。
+
+**删除** 仅删除本机当前收件项，不删除服务端内容或已复制到系统剪贴板的内容，也不会导致旧条目再次收到。显示、复制和删除都校验消息 ID；条目已经更新时，旧请求会被拒绝。已有旧历史没有敏感标记，无法自动识别和清理其中可能存在的敏感正文。
+
 主面板和历史面板可以从顶栏打开，也可运行以下命令；快捷键由用户自行配置，插件不会自动修改键位。在历史面板中点击 **返回** 可进入主面板：
 
 ```sh
@@ -169,15 +190,15 @@ omarchy shell io.github.infinifar.omaclipsync toggle
 
 插件以当前用户权限读取和写入普通 Wayland 剪贴板，向**用户配置的 HTTPS 服务**发送或接收文本。默认校验证书，只有在设置中显式开启 `insecure` 才会关闭校验；请求不跟随重定向。通知通过最多 25 秒的 HTTPS 长轮询实现，断线后按退避间隔重试。
 
-同步内容上限为 10 MiB，元数据上限为 16 KiB。自动和手动推送以及接收默认跳过密码管理器标记的敏感内容；开启后接收时保留敏感标记，并可能在启用本地历史时以明文保存。检测依赖复制来源提供敏感标记，无法识别未标记的秘密内容。更改开关时会丢弃等待处理的剪贴板事件并重启监听。插件无法使用原生监听时会暂停同步，避免无法识别自身写入造成循环。
+同步内容上限为 10 MiB，元数据上限为 16 KiB。自动和手动推送以及接收默认跳过应用标记的敏感内容；开启后按设置存入加密收件区或写入系统剪贴板。普通历史不会新增标记为敏感的推送或接收正文。检测依赖复制来源提供敏感标记，无法识别未标记的秘密内容。更改敏感同步开关时会丢弃等待处理的剪贴板事件并重启监听。插件无法使用原生监听时会暂停同步，避免无法识别自身写入造成循环。
 
-开启敏感内容同步后，接收内容会写入系统 Wayland 剪贴板，并附带密码管理器敏感标记。支持该标记的系统剪贴板历史管理器可能不显示或保存它；这与系统剪贴板本身是不同的功能。插件自带历史默认关闭，开启后可能明文保存敏感内容。实际显示和粘贴行为取决于桌面环境和应用。
+敏感收件正文与设备游标一起保存到既有 AES-GCM 加密状态中，密钥保存在 Secret Service。后台状态和通知不包含正文，显示、复制和删除操作只访问本机，不增加服务端轮询。自动写入或手动复制会附带密码管理器敏感标记；支持该标记的系统历史管理器可能不保存它，但其他应用仍可读取当前剪贴板。HTTPS 保护传输，服务端仍可读取正文。
 
 | 数据 | 默认位置 | 说明 |
 | --- | --- | --- |
 | 配置 | `~/.config/omaclipsync/config.json` | 文件权限 `0600`，不包含密码 |
 | 密码 | 当前用户的 Secret Service 密钥环 | 按服务器用户名保存 |
-| 设备令牌和待发送内容 | `~/.local/state/omaclipsync/v1-*.state` | AES-GCM 加密，密钥存于 Secret Service；不包含管理员密码 |
+| 设备令牌、待发送内容和当前敏感收件项 | `~/.local/state/omaclipsync/v1-*.state` | AES-GCM 加密，密钥存于 Secret Service；不包含管理员密码 |
 | 本地历史 | `~/.local/share/omaclipsync/history.json` | 默认关闭；启用后明文保存，权限 `0600`，默认 50 条、最多 1000 条，文件上限 16 MiB |
 | 日志 | `~/.local/state/omaclipsync/` | JSONL，权限 `0600`；记录固定事件，不记录密码和正文，按 UTC 日期保留 7 天 |
 
@@ -192,7 +213,7 @@ omarchy plugin remove io.github.infinifar.omaclipsync
 
 移除插件不会自动删除配置、历史、日志或密钥环项，请按需自行清理。手动复制安装的目录在某些 Omarchy 版本中可能被移至隐藏备份；请留意命令输出。重新启用旧 `omaclipsync` 插件前，请先禁用新插件，避免两个客户端同时运行。回退到 v0.1.1 前应备份历史文件并取消全部收藏：该版本无法读取包含收藏字段的历史。
 
-回退到旧版本时，请先备份配置，并在启动旧版服务前从 JSON 配置中移除旧版不支持的字段（例如 `sync.allowSensitive`、`sync.direction` 或 `sync.notifyOnSuccess`）；旧版会拒绝未知配置字段。
+回退到旧版本时，请先备份配置，并在启动旧版服务前从 JSON 配置中移除旧版不支持的字段（例如 `sync.autoApplySensitive`、`sync.allowSensitive`、`sync.direction` 或 `sync.notifyOnSuccess`）；旧版会拒绝未知配置字段。回退前也应备份加密状态；不支持收件区的旧版可能在保存状态时丢弃收件项。
 
 ## 从源码构建
 
@@ -204,6 +225,7 @@ RustClipSync 同步逻辑在相邻的 `rustclipsync-core` 项目中统一维护�
 
 ```sh
 cargo test --manifest-path core/Cargo.toml --locked
+gjs tests/inbox.test.js Inbox.js
 cargo clippy --manifest-path core/Cargo.toml --locked --all-targets -- -D warnings
 cargo build --manifest-path core/Cargo.toml --locked --bin syncclipd
 # 在隔离 Wayland 合成器中设置 RCS_TEST_DISPOSABLE_WAYLAND=1 后，可执行：

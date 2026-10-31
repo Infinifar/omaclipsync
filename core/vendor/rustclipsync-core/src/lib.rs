@@ -24,6 +24,7 @@ pub fn hash(text: &str) -> String {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
+    Stored,
     Uploaded,
     Current,
     Downloaded,

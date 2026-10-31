@@ -1,6 +1,6 @@
 # Omaclipsync
 
-Version **0.2.1** is released. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.1), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
+Version **0.2.2** adds the encrypted sensitive inbox. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.2), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
 
 English · [简体中文](README-ZH.md)
 
@@ -15,10 +15,20 @@ For Android, use the [Fcitx5 Android input method](https://github.com/Infinifar/
 Measurements from the older protocol do not describe the current implementation; desktop resource usage still needs separate measurement.
 
 <p align="center">
-  <img src="preview.png" alt="Omaclipsync main panel">
+  <img src="preview.png" alt="Omaclipsync 0.2.2 main panel" width="578">
 </p>
 
-The screenshot shows the running plugin; the server address and last synchronization time have been removed for privacy.
+Screenshots were captured from the real Omarchy plugin. Server details and last-sync values are hidden; revealed text below is a harmless test fixture.
+
+<p align="center"><strong>Sensitive inbox — masked</strong><br>
+  <img src="assets/screenshots/inbox-masked.png" alt="Sensitive inbox with its body hidden" width="578">
+</p>
+<p align="center"><strong>Explicit reveal — test text only</strong><br>
+  <img src="assets/screenshots/inbox-revealed.png" alt="Sensitive inbox revealing a harmless test item" width="578">
+</p>
+<p align="center"><strong>Receive mode settings</strong><br>
+  <img src="assets/screenshots/receive-mode.png" alt="Sensitive sync allowed and automatic clipboard writing disabled" width="578">
+</p>
 
 ## Features
 
@@ -28,7 +38,7 @@ The screenshot shows the running plugin; the server address and last synchroniza
 - **Sync direction**: choose push only, receive only, or two-way automatic sync (the default) in the main panel. Manual push and receive remain available in every mode; pause stops automatic sync.
 - **Optional local history**: off by default; browse, copy, paste, and favorite up to five entries. Favorites stay at the top and survive clearing ordinary history. Enabled history is stored as plaintext; system clipboard history can be used instead.
 - **Sync notifications**: enabled by default and configurable in Settings. Successful pushes and receives show a notification without revealing clipboard text; unchanged and failed operations do not.
-- **Sensitive clipboard policy**: synchronization of password-manager-marked selections is off by default and can be enabled in Settings. This applies to automatic and manual pushes.
+- **Sensitive clipboard policy and inbox**: marked sensitive content is blocked in both directions by default. When allowed, choose an encrypted inbox or automatic clipboard writing. The inbox keeps only its latest item, masks the preview, and offers reveal, receipt time, copy and delete. Ordinary history no longer records marked sensitive text.
 - **Filtering and deduplication**: regex blacklist or whitelist and optional filtering on receive. Message IDs and a persistent per-device cursor suppress retries and repeated notifications while allowing distinct copies of identical text.
 
 If notifications do not appear, check Omarchy's Do Not Disturb mode with `omarchy shell notifications isDnd`. On Omarchy 4.5.0 RC, notifications received while it is on are kept in notification history without a pop-up. Turn it off in Omarchy or run `omarchy shell notifications setDnd off` to allow pop-ups again.
@@ -112,6 +122,17 @@ When upgrading, the configuration, history, logs, and keyring entries keep their
 3. Initial pairing starts at the current server revision without overwriting the local clipboard; the selection present at startup is not uploaded. Offline synchronization catches up to the latest value. Conflicting pending local text is preserved; explicitly use **Push** to choose the current local clipboard. **Receive** and **Pause** are also available.
 4. Enable local history and filters if desired. Selecting a history entry changes the system clipboard and may push it to the server when synchronization is enabled. Paste sends Shift+Insert to the application active before opening history; if that window is unavailable, the item is copied and a notification is shown.
 
+### Sensitive inbox
+
+Enable **Allow sensitive content** in Settings, then choose how to receive it with **Automatically copy sensitive receives**:
+
+- **Off**: keep the latest sensitive text in the encrypted local inbox without changing the system clipboard. This is the default for new configurations. A new sensitive item replaces the previous one; ordinary text does not clear it, and local history can remain disabled.
+- **On**: write new sensitive text directly to the system clipboard with its sensitivity marker, without retaining it in the inbox or ordinary history. Existing saved configurations missing this field preserve automatic writing; turn it off to use the inbox. Switching modes does not apply or delete an existing inbox item, reset device identity or move the receive cursor backwards.
+
+The inbox appears below sync direction on the main panel, with History and Settings still in the last row. Text is masked until you click **Show**. Closing the panel, entering another view, losing the background connection or receiving a replacement hides it again. The preview retains at most the first 64 KiB and shows up to four lines; **Copy to clipboard** copies the complete original through Rust with its sensitive marker and suppresses automatic re-upload. Receipt time follows the active locale and local time zone.
+
+**Delete** removes only the current local inbox item. It does not delete server content or clear a copy already placed on the system clipboard, and the consumed item is not received again. Read, copy and delete validate the message ID, rejecting stale commands after replacement. Existing history lacks sensitivity metadata, so old sensitive entries cannot be identified or removed automatically.
+
 Open the main panel or history from the bar, or run these commands; the plugin does not automatically change keybindings. In the history panel, select **Back** to return to the main panel:
 
 ```sh
@@ -169,15 +190,15 @@ omarchy shell io.github.infinifar.omaclipsync toggle
 
 The plugin runs with the current user's permissions, reads and writes the regular Wayland clipboard, and exchanges text with the **user-configured HTTPS server**. TLS certificate validation is on by default and can only be disabled by explicitly enabling `insecure`. Requests do not follow redirects. HTTPS long polling waits up to 25 seconds and reconnects with backoff.
 
-Text is limited to 10 MiB and metadata to 16 KiB. Automatic and manual pushes and receives skip marked sensitive content by default. If enabled, received text retains its sensitivity marker and can be saved as plaintext if local history is enabled. The protection relies on applications marking their clipboard offers; unmarked secrets cannot be identified. Changing this option discards queued clipboard events and restarts the listener. The plugin pauses if native listening is unavailable so its own writes cannot create a loop.
+Text is limited to 10 MiB and metadata to 16 KiB. Automatic and manual pushes and receives skip marked sensitive content by default. If allowed, receives use the encrypted inbox or system clipboard according to Settings. Ordinary history excludes new marked sensitive uploads and receives. Protection relies on source applications marking clipboard offers; unmarked secrets cannot be identified. Changing the sensitive synchronization permission discards queued clipboard events and restarts the listener. The plugin pauses if native listening is unavailable so its own writes cannot create a loop.
 
-When sensitive synchronization is enabled, received text is written to the system Wayland clipboard with a password-manager sensitivity marker. Clipboard history managers that respect this marker may omit it from their history; the history list is separate from the system clipboard itself. The plugin's own history is off by default and may store sensitive text in plaintext when enabled. Actual display and paste behavior depends on the desktop environment and application.
+The inbox body and receive cursor are committed together in the existing AES-GCM encrypted state, with its key held in Secret Service. Status and notifications contain no body. Reveal, copy and delete are local operations and add no server polling. Automatic writes and explicit copies carry the password-manager sensitivity marker; compatible history managers may omit them, but other applications can still read the current clipboard. HTTPS protects transport; the server can still read the text.
 
 | Data | Default location | Behavior |
 | --- | --- | --- |
 | Configuration | `~/.config/omaclipsync/config.json` | Mode `0600`; contains no password |
 | Password | User's Secret Service keyring | Stored per server username |
-| Device token and pending text | `~/.local/state/omaclipsync/v1-*.state` | AES-GCM encrypted; the key is in Secret Service, without the administrator password |
+| Device token, pending text and current sensitive inbox item | `~/.local/state/omaclipsync/v1-*.state` | AES-GCM encrypted; the key is in Secret Service, without the administrator password |
 | Local history | `~/.local/share/omaclipsync/history.json` | Off by default; plaintext when enabled, mode `0600`, default 50 entries, maximum 1000, file limit 16 MiB |
 | Logs | `~/.local/state/omaclipsync/` | JSONL, mode `0600`; fixed events only, no password or clipboard text, retained for 7 UTC dates |
 
@@ -192,7 +213,7 @@ omarchy plugin remove io.github.infinifar.omaclipsync
 
 Uninstalling the plugin does not automatically delete configuration, history, logs, or keyring entries; remove those separately if desired. Some Omarchy versions move a manually copied plugin directory to a hidden backup; check the command output. Before re-enabling the old `omaclipsync` plugin, first disable the new plugin to avoid running both clients. Before rolling back to v0.1.1, back up the history file and remove all favorites: that version cannot read history containing favorite fields.
 
-When rolling back, back up the configuration and remove fields unsupported by the older daemon (such as `sync.allowSensitive`, `sync.direction`, or `sync.notifyOnSuccess`) before starting it; older builds reject unknown configuration fields.
+When rolling back, back up the configuration and remove fields unsupported by the older daemon (such as `sync.autoApplySensitive`, `sync.allowSensitive`, `sync.direction`, or `sync.notifyOnSuccess`) before starting it; older builds reject unknown configuration fields. Back up encrypted state too: a build without inbox support may discard the inbox item when it saves state.
 
 ## Build from source
 
@@ -204,6 +225,7 @@ For QML static checks on an Omarchy machine with `qmllint` installed, run `./scr
 
 ```sh
 cargo test --manifest-path core/Cargo.toml --locked
+gjs tests/inbox.test.js Inbox.js
 cargo clippy --manifest-path core/Cargo.toml --locked --all-targets -- -D warnings
 cargo build --manifest-path core/Cargo.toml --locked --bin syncclipd
 # With an isolated Wayland compositor and RCS_TEST_DISPOSABLE_WAYLAND=1:

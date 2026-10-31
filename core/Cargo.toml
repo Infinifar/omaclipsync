@@ -1,12 +1,12 @@
 [package]
 name = "omaclipsync-core"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 publish = false
 
 [dependencies]
-rustclipsync-core = { version = "=0.1.0", path = "vendor/rustclipsync-core" }
+rustclipsync-core = { version = "=0.2.0", path = "vendor/rustclipsync-core" }
 regex = "1.12"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }

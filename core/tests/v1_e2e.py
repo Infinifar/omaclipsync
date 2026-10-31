@@ -82,6 +82,10 @@ def run():
                 def log_message(self, *args):
                     pass
 
+                def handle(self):
+                    with contextlib.suppress(BrokenPipeError, ConnectionResetError, TimeoutError):
+                        super().handle()
+
                 def handle_request(self):
                     connection = http.client.HTTPConnection("127.0.0.1", backend_port, timeout=32)
                     try:
@@ -307,7 +311,91 @@ else: sys.exit(1)
             assert status()["deviceId"] != old_device
             time.sleep(1)
             assert state()["revision"] == 8 and paste() == "fresh-after-restart", "re-pairing replayed old clipboard"
-            print("PASS: baseline, A→B→A, clear/restart replay, sensitive policy, offline latest, stale-outbox recovery and device re-pair")
+            # Old saved configurations preserve automatic sensitive application.
+            updated_config = rpc("get_config")["result"]
+            assert updated_config["sync"]["autoApplySensitive"] is True
+            updated_config["sync"].update({"allowSensitive": True, "autoApplySensitive": False, "direction": "receive"})
+            updated_config["history"]["enabled"] = True
+            assert rpc("set_config", {"config": updated_config}).get("ok") is True
+            until(lambda: status().get("state") == "connected", "inbox policy was not applied")
+            device = status()["deviceId"]
+            copy("local clipboard remains untouched")
+            time.sleep(0.5)
+            first_id, received = send("inbox-sensitive-fixture", 8, sensitive=True)
+            assert received["revision"] == 9
+            until(lambda: (status().get("inbox") or {}).get("id") == first_id, "sensitive item did not reach inbox")
+            meta = status()["inbox"]
+            assert set(meta) == {"id", "receivedAt"} and meta["receivedAt"] > 0
+            assert "inbox-sensitive-fixture" not in json.dumps(status())
+            assert paste() == "local clipboard remains untouched", "inbox receive wrote the OS clipboard"
+            assert rpc("read_inbox", {"id": first_id, "offset": 0})["result"]["text"] == "inbox-sensitive-fixture"
+            assert rpc("read_inbox", {"id": str(uuid.uuid4()), "offset": 0}).get("error") == "inbox_stale"
+            daemon.terminate()
+            daemon.wait(timeout=5)
+            daemon, messages = start_daemon()
+            until(lambda: status().get("state") == "connected", "inbox restart failed")
+            assert status()["inbox"] == meta and status()["deviceId"] == device
+            assert state()["revision"] == 9 and paste() == "local clipboard remains untouched"
+            # Re-enable pushing to prove explicit copying is not uploaded as a new copy.
+            updated_config["sync"]["direction"] = "both"
+            assert rpc("set_config", {"config": updated_config}).get("ok") is True
+            until(lambda: status().get("state") == "connected", "direction switch failed")
+            # Copying an inbox item also supersedes any queued offline clipboard.
+            server.terminate()
+            server.wait(timeout=5)
+            server = None
+            copy("queued-before-inbox-copy")
+            time.sleep(1)
+            assert rpc("copy_inbox", {"id": first_id}).get("ok") is True
+            until(lambda: paste() == "inbox-sensitive-fixture", "inbox copy did not write original")
+            server = start_server()
+            until(lambda: status().get("state") == "connected", "offline inbox copy did not recover", timeout=45)
+            time.sleep(1)
+            assert state()["revision"] == 9, "explicit inbox copy was reuploaded"
+            types = subprocess.run(["wl-paste", "--list-types"], env=daemon_env, check=True, stdout=subprocess.PIPE, timeout=4).stdout.decode()
+            assert "x-kde-passwordManagerHint" in types
+            long_secret = '<img src="https://invalid.test">😀中文' * 5000
+            second_id, received = send(long_secret, 9, sensitive=True)
+            assert received["revision"] == 10
+            until(lambda: (status().get("inbox") or {}).get("id") == second_id, "latest inbox did not replace old item")
+            for method in ("read_inbox", "copy_inbox", "clear_inbox"):
+                assert rpc(method, {"id": first_id, "offset": 0}).get("error") == "inbox_stale", "stale command affected replacement"
+            chunk = rpc("read_inbox", {"id": second_id, "offset": 0})["result"]
+            assert len(chunk["text"].encode()) <= 16384 and chunk["total"] == len(long_secret.encode())
+            assert rpc("read_inbox", {"id": second_id, "offset": chunk["total"] + 1}).get("error") == "invalid_request"
+            assert rpc("copy_inbox", {"id": second_id}).get("ok") is True
+            until(lambda: paste() == long_secret, "copy truncated the sensitive original")
+            time.sleep(1)
+            assert state()["revision"] == 10, "long inbox copy was reuploaded"
+            assert rpc("history")["result"]["entries"] == [], "sensitive content entered ordinary history"
+            assert rpc("clear_inbox", {"id": second_id}).get("ok") is True
+            assert status().get("inbox") is None
+            assert rpc("pull").get("ok") is True
+            time.sleep(1)
+            assert status().get("inbox") is None and state()["revision"] == 10, "deleted item was received again"
+            assert paste() == long_secret, "deleting the inbox unexpectedly changed the clipboard"
+            state_files = list((root / "state").rglob("v1-*.state"))
+            assert len(state_files) == 1 and (state_files[0].stat().st_mode & 0o777) == 0o600
+            assert b"inbox-sensitive-fixture" not in state_files[0].read_bytes()
+            daemon.terminate()
+            daemon.wait(timeout=5)
+            daemon, messages = start_daemon()
+            until(lambda: status().get("state") == "connected", "restart after inbox deletion failed")
+            assert status().get("inbox") is None and state()["revision"] == 10
+            updated_config["sync"]["autoApplySensitive"] = True
+            assert rpc("set_config", {"config": updated_config}).get("ok") is True
+            until(lambda: status().get("state") == "connected", "automatic reception switch failed")
+            _, received = send("sensitive-auto-after-inbox", 10, sensitive=True)
+            assert received["revision"] == 11
+            until(lambda: paste() == "sensitive-auto-after-inbox", "automatic sensitive application did not resume")
+            assert status().get("inbox") is None
+            assert rpc("history")["result"]["entries"] == [], "automatic sensitive receive entered history"
+            subprocess.run(["wl-copy", "--sensitive"], input=b"sensitive-upload-with-history", env=daemon_env, check=True, timeout=4)
+            until(lambda: state()["revision"] == 12, "sensitive upload with history failed")
+            assert rpc("history")["result"]["entries"] == [], "sensitive upload entered history"
+            logs = b"".join(p.read_bytes() for p in (root / "state").rglob("*.jsonl"))
+            assert b"inbox-sensitive-fixture" not in logs and b"sensitive-upload-with-history" not in logs
+            print("PASS: V1 recovery and pairing; sensitive inbox restart, latest-only, metadata-only status, bounded reads, stale IDs, marked full copy without upload, delete without replay, automatic mode and sensitive-history exclusion")
         finally:
             if daemon is not None:
                 daemon.terminate()

@@ -3,7 +3,7 @@ use chrono::Utc;
 use omaclipsync_core::{
     config::{Config, ConfigError, ServerProtocol, SyncDirection},
     history::{Entry, History, HistoryError},
-    keyring,
+    inbox, keyring,
     logging::{Event, Level, Logger},
     protocol::{self, Request},
     session::{Outcome, Session, SyncError, WaylandClipboard},
@@ -345,7 +345,10 @@ impl App {
                 history,
                 Arc::clone(&self.clipboard_serial),
             ) {
-                Ok(session) => self.v1 = Some(session),
+                Ok(mut session) => {
+                    session.use_sensitive_inbox(!self.config.sync.auto_apply_sensitive);
+                    self.v1 = Some(session);
+                }
                 Err(V1Error::Credentials) => {
                     self.session = None;
                     self.state = "credentials";
@@ -578,7 +581,7 @@ impl App {
         } else {
             transport
         };
-        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"deviceId":self.v1.as_ref().map(|s| &s.persisted.state.device_id),"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error) || self.v1.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
+        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"deviceId":self.v1.as_ref().map(|s| &s.persisted.state.device_id),"inbox":inbox::metadata(self.v1.as_ref().and_then(|s| s.persisted.inbox.as_ref())),"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error) || self.v1.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
     }
     fn stamp_sync(&mut self) {
         self.last_sync = Some(
@@ -606,7 +609,7 @@ impl App {
                 self.stamp_sync();
                 self.log(Event::Uploaded)
             }
-            Outcome::Downloaded => {
+            Outcome::Downloaded | Outcome::Stored => {
                 self.stamp_sync();
                 self.log(Event::Downloaded)
             }
@@ -1156,6 +1159,44 @@ impl App {
                     None => Err("not_configured"),
                 }
             }
+            "read_inbox" => match self.v1.as_ref().and_then(|s| s.persisted.inbox.as_ref()) {
+                Some(item) => {
+                    match (
+                        request.params.get("id").and_then(Value::as_str),
+                        request.params.get("offset").and_then(Value::as_u64),
+                    ) {
+                        (Some(id), Some(offset)) => inbox::read_chunk(item, id, offset),
+                        _ => Err("invalid_request"),
+                    }
+                }
+                None => Err("inbox_stale"),
+            },
+            "copy_inbox" => match request.params.get("id").and_then(Value::as_str) {
+                Some(id) => match self.v1.as_mut() {
+                    Some(session) => match session.copy_inbox(id) {
+                        Ok(true) => Ok(json!({})),
+                        Ok(false) => Err("inbox_stale"),
+                        Err(V1Error::Clipboard(_)) => Err("clipboard_unavailable"),
+                        Err(error) => {
+                            self.v1_failure(error);
+                            Err("inbox_failed")
+                        }
+                    },
+                    None => Err("inbox_stale"),
+                },
+                None => Err("invalid_request"),
+            },
+            "clear_inbox" => match request.params.get("id").and_then(Value::as_str) {
+                Some(id) => match self.v1.as_mut().map(|s| s.clear_inbox(id)) {
+                    Some(Ok(true)) => Ok(json!({"cleared": true})),
+                    Some(Ok(false)) | None => Err("inbox_stale"),
+                    Some(Err(error)) => {
+                        self.v1_failure(error);
+                        Err("inbox_failed")
+                    }
+                },
+                None => Err("invalid_request"),
+            },
             "history" => match self.session.as_ref() {
                 Some(s) => s
                     .history
@@ -1400,6 +1441,7 @@ fn fallback_watch(
 }
 fn outcome_name(outcome: &Outcome) -> &'static str {
     match outcome {
+        Outcome::Stored => "stored",
         Outcome::Uploaded => "uploaded",
         Outcome::Current => "current",
         Outcome::Downloaded => "downloaded",
@@ -1413,7 +1455,12 @@ fn outcome_name(outcome: &Outcome) -> &'static str {
 }
 
 fn emit_sync_success(out: &mut impl Write, outcome: &Outcome, enabled: bool) {
-    if enabled && matches!(outcome, Outcome::Uploaded | Outcome::Downloaded) {
+    if enabled
+        && matches!(
+            outcome,
+            Outcome::Uploaded | Outcome::Downloaded | Outcome::Stored
+        )
+    {
         let _ = protocol::event(
             out,
             "sync_success",
@@ -1482,6 +1529,7 @@ fn main() {
                         let outcome = match value.get("outcome").and_then(Value::as_str) {
                             Some("uploaded") => Some(Outcome::Uploaded),
                             Some("downloaded") => Some(Outcome::Downloaded),
+                            Some("stored") => Some(Outcome::Stored),
                             _ => None,
                         };
                         if let Some(outcome) = outcome {
@@ -1603,7 +1651,7 @@ mod tests {
     }
 
     #[test]
-    fn success_events_only_report_actual_transfers_when_enabled() {
+    fn success_events_report_transfers_and_durable_receipts_without_bodies() {
         let mut output = Vec::new();
         emit_sync_success(&mut output, &Outcome::Uploaded, false);
         emit_sync_success(&mut output, &Outcome::Current, true);
@@ -1611,6 +1659,7 @@ mod tests {
         assert!(output.is_empty());
         emit_sync_success(&mut output, &Outcome::Uploaded, true);
         emit_sync_success(&mut output, &Outcome::Downloaded, true);
+        emit_sync_success(&mut output, &Outcome::Stored, true);
         let events: Vec<Value> = String::from_utf8(output)
             .unwrap()
             .lines()
@@ -1620,7 +1669,8 @@ mod tests {
             events,
             vec![
                 json!({"event":"sync_success", "data":{"outcome":"uploaded"}}),
-                json!({"event":"sync_success", "data":{"outcome":"downloaded"}})
+                json!({"event":"sync_success", "data":{"outcome":"downloaded"}}),
+                json!({"event":"sync_success", "data":{"outcome":"stored"}})
             ]
         );
     }

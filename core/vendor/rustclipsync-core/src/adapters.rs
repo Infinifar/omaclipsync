@@ -43,6 +43,16 @@ pub trait HistorySink {
     type Error;
     /// Optional history failure does not roll back a completed synchronization.
     fn record(&self, text: &str, direction: Direction, timestamp: u64) -> Result<(), Self::Error>;
+    /// Hosts may withhold marked content from ordinary history previews.
+    fn record_marked(
+        &self,
+        text: &str,
+        direction: Direction,
+        timestamp: u64,
+        _sensitive: bool,
+    ) -> Result<(), Self::Error> {
+        self.record(text, direction, timestamp)
+    }
 }
 
 /// Default for clients without history: no retained text and no filesystem I/O.
