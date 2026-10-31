@@ -1,6 +1,6 @@
 # Omaclipsync
 
-Version **0.2.2** adds the encrypted sensitive inbox. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.2), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
+Version **0.2.3** adds the encrypted sensitive inbox. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.3), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
 
 English · [简体中文](README-ZH.md)
 
@@ -15,10 +15,10 @@ For Android, use the [Fcitx5 Android input method](https://github.com/Infinifar/
 Measurements from the older protocol do not describe the current implementation; desktop resource usage still needs separate measurement.
 
 <p align="center">
-  <img src="preview.png" alt="Omaclipsync 0.2.2 main panel" width="578">
+  <img src="preview.png" alt="Omaclipsync 0.2.3 main panel" width="578">
 </p>
 
-Screenshots were captured from the real Omarchy plugin. Server details and last-sync values are hidden; revealed text below is a harmless test fixture.
+Screenshots were captured from the real Omarchy plugin in English. Server details and last-sync values are hidden; revealed text below is a harmless test fixture.
 
 <p align="center"><strong>Sensitive inbox — masked</strong><br>
   <img src="assets/screenshots/inbox-masked.png" alt="Sensitive inbox with its body hidden" width="578">

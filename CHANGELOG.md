@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3 (2026-10-31)
+
+- Replace documentation screenshots with fresh English UI captures, using harmless sample text and redacted account details.
+- Simplify an equivalent boolean condition for the newer GitLab Clippy version.
+
 ## 0.2.2 (2026-10-31)
 
 - Add a masked sensitive inbox to the main panel, with receipt time, explicit reveal, full-text copy and local deletion. Keep only the latest item in encrypted state, independently of ordinary history.

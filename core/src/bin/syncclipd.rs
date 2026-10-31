@@ -870,7 +870,7 @@ impl App {
         let receive_due = self.config.sync.direction.can_receive()
             && ((self.pull_pending && now >= self.next_signal_pull)
                 || (!self.signal_connected && now >= self.next_fallback));
-        if !(pending && may_flush) && !receive_due {
+        if !(receive_due || pending && may_flush) {
             return;
         }
         let _ = protocol::event(out, "activity", &json!({"active":true}));

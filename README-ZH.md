@@ -1,6 +1,6 @@
 # Omaclipsync
 
-**0.2.2** 新增加密敏感收件区，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.2)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
+**0.2.3** 新增加密敏感收件区，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.3)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
 
 [English](README.md) · 简体中文
 
@@ -15,10 +15,10 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 旧协议版本的历史性能数据不适用于当前实现；实际桌面资源占用尚需单独测量。
 
 <p align="center">
-  <img src="preview.png" alt="Omaclipsync 0.2.2 主面板" width="578">
+  <img src="preview.png" alt="Omaclipsync 0.2.3 主面板" width="578">
 </p>
 
-截图来自实际运行的 Omarchy 插件，服务器信息和最近同步时间已遮盖；下方显示的正文仅为无敏感信息的测试文本。
+截图来自实际运行的英文 Omarchy 插件界面，服务器信息和最近同步时间已遮盖；下方显示的正文仅为无敏感信息的测试文本。
 
 <p align="center"><strong>敏感收件区：默认遮罩</strong><br>
   <img src="assets/screenshots/inbox-masked.png" alt="默认隐藏正文的敏感收件区" width="578">
