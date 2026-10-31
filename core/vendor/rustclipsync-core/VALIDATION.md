@@ -19,9 +19,13 @@
 
 真实 HTTPS 测试使用临时 SQLCipher 数据库、固定测试账户、临时自签名证书和 loopback TLS 代理；自签名验证例外只用于这个隔离测试。测试中的两个客户端使用内存剪贴板和内存密文存储，不访问真实桌面或线上服务。
 
+## GitHub 原生验证
+
+共享核心在 [GitHub CI 41190778425](https://github.com/Infinifar/rustclipsync-core/actions/runs/41190778425) 的 Ubuntu 与 Windows x64 MSVC 作业均通过，验证提交 `d1a7cb341baa6d0fe9065805d5802261aa0258fd`，工具链 Rust 1.99.1。每个平台执行 20 项测试、格式检查和 Clippy。Windows 测试包含旧加密状态迁移与完整会话行为测试。
+
 ## 尚未验证的部分
 
-- Windows 原生编译和 OS 剪贴板行为：本机未安装 Windows 编译工具链，未宣称通过。已加入 Linux/Windows CI 工作流，需发布仓库后在 runner 上执行。
+- 共享核心的 Windows 原生编译与测试已经通过；OS 剪贴板、DPAPI、UI 等适配行为由 Windows 客户端独立验证，不能用共享库测试代替。
 - 本轮真实 Wayland 剪贴板端到端测试：尝试启动隔离 Hyprland，但当前环境无法独立启动 headless backend；未改用用户的真实剪贴板。协议集成测试不能代替这项平台验证。
 - Windows UI、DPAPI、Named Pipe、安装签名、内存/延迟/24 小时测试：属于桌面项目后续阶段，本轮没有实现或测量。
 
