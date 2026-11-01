@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5 (2026-11-01)
+
+- Update the shared core to fix pending-upload filtering, restart validation, oversized-copy replacement, slow-download echo suppression, ambiguous clipboard write recovery and connection-event delivery under backpressure.
+- Preserve pairing and encrypted state; include standard error chains and explicit worker shutdown/join APIs.
+- Rebuild both bundled executables with the fixed toolchain and verify their bytes before packaging.
+
 ## 0.2.4 (2026-10-31)
 
 - Pin the native build image, compiler/linker and paths; rebuild and byte-compare both committed executables in GitHub/GitLab CI before packaging.

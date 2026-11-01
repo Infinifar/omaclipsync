@@ -3,6 +3,7 @@ name: Rebuild, compare and publish native assets
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
   release:
     types: [published]
@@ -26,7 +27,7 @@ jobs:
       - name: Package the verified source build
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
           set -euo pipefail
           version=$(jq -er '.version' manifest.json)
@@ -44,3 +45,22 @@ jobs:
           version=$(jq -er '.version' manifest.json)
           [[ "$RELEASE_TAG" == "v$version" ]]
           gh release upload "$RELEASE_TAG" "dist/omaclipsync-plugin-$version.tar.gz" dist/syncclipd-linux-x86_64 dist/syncclipctl-linux-x86_64 dist/BUILD-EVIDENCE.txt dist/SHA256SUMS
+      - name: Publish the verified tagged build
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(jq -er '.version' manifest.json)
+          [[ "$RELEASE_TAG" == "v$version" ]]
+          gh release create "$RELEASE_TAG" --verify-tag --draft \
+            --title "Omaclipsync $version" --notes-file "releases/$RELEASE_TAG.md" \
+            "dist/omaclipsync-plugin-$version.tar.gz" dist/syncclipd-linux-x86_64 \
+            dist/syncclipctl-linux-x86_64 dist/BUILD-EVIDENCE.txt dist/SHA256SUMS
+          verify="$RUNNER_TEMP/release-asset-check"
+          gh release download "$RELEASE_TAG" --dir "$verify"
+          cmp dist/SHA256SUMS "$verify/SHA256SUMS"
+          (cd "$verify" && sha256sum --check SHA256SUMS)
+          gh release edit "$RELEASE_TAG" --draft=false --latest
