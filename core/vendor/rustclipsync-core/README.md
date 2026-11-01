@@ -31,6 +31,8 @@ On a state persistence error, pause and rebuild the session instead of continuin
 
 Synchronization entry points check restored pending content against the current clipboard before sending. `flush` applies the current sensitive-content and regex policies to the latest queued value. An oversized new copy also supersedes the old value; uncertain uploads are resolved through cancellation before they are discarded. If a clipboard write returns an error, the session durably records it as `skipped` before returning the error, so later receives can continue without replaying the ambiguous write. A failure to save that recovery is a state persistence error and requires rebuilding the session.
 
+`Error`, `SyncError` and `ClipboardError` implement `Display` and `std::error::Error`. Their display text omits underlying URLs and adapter-provided details; `source()` retains the typed causes for callers that need to inspect them. `Worker::shutdown()` requests a stop without waiting. `Worker::join()` requests a stop and waits for completion, returning any thread panic to the host; call it away from the UI thread. Dropping a worker still requests a stop without waiting. Custom `Transport` implementations must bound each operation, including the entire long-poll request, with a finite timeout; shutdown cannot interrupt an in-flight custom call.
+
 ## Protocol and privacy constraints
 
 - Connects to the [RustClipSync server](https://github.com/Infinifar/rustclipsync-server) using its [protocol](https://github.com/Infinifar/rustclipsync-server/blob/main/PROTOCOL-V1.md). Legacy SyncClipboard HTTP/SignalR transport is not implemented.

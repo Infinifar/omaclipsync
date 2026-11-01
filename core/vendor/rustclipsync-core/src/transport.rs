@@ -5,9 +5,19 @@ use crate::{
     Error,
 };
 
+/// Blocking protocol operations with finite, implementation-defined timeouts.
+/// Implementations must bound network reads, writes and connection setup so the
+/// host can stop synchronization and recover from unavailable peers.
 pub trait Transport: Send + Sync {
     fn register(&self, session: &Persisted) -> Result<Registration, Error>;
     fn state(&self, session: &Persisted) -> Result<RemoteState, Error>;
+    /// Wait for metadata changes, returning `None` when the long poll expires.
+    /// Enforce and document a finite timeout for the entire request, including
+    /// reading its response. The built-in client uses 30 seconds. Worker shutdown
+    /// cannot interrupt this call and its join waits for it to return.
+    ///
+    /// # Errors
+    /// Returns a transport or protocol error if the request cannot complete.
     fn changes(&self, session: &Persisted) -> Result<Option<RemoteState>, Error>;
     fn content(&self, session: &Persisted, message: &Message) -> Result<String, Error>;
     fn send(&self, session: &Persisted, outbox: &Outbox) -> Result<u64, Error>;

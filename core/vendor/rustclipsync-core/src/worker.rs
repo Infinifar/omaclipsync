@@ -21,6 +21,7 @@ pub enum Event {
 pub struct Worker {
     state: Arc<Mutex<Persisted>>,
     stop: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Worker {
@@ -34,7 +35,7 @@ impl Worker {
         let stop = Arc::new(AtomicBool::new(false));
         let current = Arc::clone(&state);
         let stopped = Arc::clone(&stop);
-        thread::spawn(move || {
+        let thread = thread::spawn(move || {
             let mut online = false;
             let mut delay = 1;
             let mut pending_connection = None;
@@ -114,12 +115,39 @@ impl Worker {
                 }
             }
         });
-        Self { state, stop }
+        Self {
+            state,
+            stop,
+            thread: Some(thread),
+        }
     }
 
     pub fn update(&self, state: &Persisted) {
         if let Ok(mut value) = self.state.lock() {
             *value = state.notification_identity();
+        }
+    }
+
+    /// Request shutdown without waiting for an in-flight transport request.
+    /// Repeated calls are harmless. [`Self::join`] waits for the thread to exit.
+    pub fn shutdown(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
+
+    /// Request shutdown and wait until the polling thread has exited.
+    ///
+    /// This blocks until an in-flight [`Transport::changes`] call returns, so
+    /// call it away from the UI thread. The built-in client bounds that request
+    /// to 30 seconds; custom transports must also enforce a finite timeout.
+    /// Dropping the worker requests shutdown without waiting.
+    ///
+    /// # Errors
+    /// Returns the panic payload if the polling thread panicked.
+    pub fn join(mut self) -> thread::Result<()> {
+        self.shutdown();
+        match self.thread.take() {
+            Some(thread) => thread.join(),
+            None => Ok(()),
         }
     }
 }
@@ -145,6 +173,6 @@ fn deliver(
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
+        self.shutdown();
     }
 }

@@ -30,6 +30,32 @@ pub enum SyncError {
     Expired,
     Epoch,
 }
+
+impl std::fmt::Display for SyncError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Remote(error) => write!(f, "remote synchronization failed: {error}"),
+            Self::Clipboard(error) => write!(f, "clipboard synchronization failed: {error}"),
+            Self::Storage(_) => f.write_str("session state persistence failed"),
+            Self::Credentials => f.write_str("pairing credentials are required"),
+            Self::Conflict => f.write_str("synchronization conflict"),
+            Self::Expired => f.write_str("pending upload has expired"),
+            Self::Epoch => f.write_str("device registration or server epoch changed"),
+        }
+    }
+}
+
+impl std::error::Error for SyncError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Remote(error) => Some(error),
+            Self::Clipboard(error) => Some(error),
+            Self::Storage(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
 impl From<Error> for SyncError {
     fn from(value: Error) -> Self {
         match value {

@@ -5,16 +5,16 @@
   "files": {
     "Cargo.toml": "df762167e355ac94bcff66caed28c4ea6a648a43fcf2545393d62e228b2e86b1",
     "LICENSE": "e2a1c93da3bd7ecef573b225d7f159213fc89440b22487d1930b4c58a99bf84c",
-    "README.md": "00b4e03abb315edcddaf617f11c1716bc391b7eee238ed354af392af13c70a71",
-    "VALIDATION.md": "a76be478356a3df6dcda574a670707f60d5b1feadb88156ad78239d532a326cb",
-    "src/adapters.rs": "fe4a1c01ec360046f4454dab31a8a457273cbef2c4e4cbe9673d1cbd279032c1",
+    "README.md": "7b4c8f273bf1bba1ad29057dc743e75655a308da33b3e5178822ef48ce7162c9",
+    "VALIDATION.md": "6b3d697505df0c43a8da376f78cd2a4c40c9f8bfc3ee9e82f4e51351d82894cc",
+    "src/adapters.rs": "4c87eba6a900c9a9b2ab503190d9a4542d470bb3f1ddac951126c1f94315174f",
     "src/client.rs": "1438c864ac46c902484917718359524554d79a51a0dbaf82bcdac691b032bd02",
-    "src/error.rs": "32e177da7a3e4e34e6859d2c93bdb5f81589253ea981711c3c365a0c0cb0ffa1",
+    "src/error.rs": "1b066be5b85f8d884b06e12ef0ac195fc7b52b93f6c9564f16d0b9aed63705da",
     "src/filter.rs": "10444993546bc3164f2a103e7e4198b873c1363e7b19aba92aac518d531b7a16",
     "src/lib.rs": "f5146a5e8321a6478252c6c474446889340221b321c68f025b12d37f3343399b",
-    "src/session.rs": "e8ddba27507859189f5940f8c7a52735e794b2ea3d937156598056b1d09568c0",
+    "src/session.rs": "3d9ca7fc500af855fc7c5140bca4cef00b4152bfb1c10ed9ffe66b0e4c148627",
     "src/state.rs": "0fb673c9ab87aa41c0ddd914ccb4f3ac2bcc076a6c8e832d339d635e0fe63251",
-    "src/transport.rs": "d404bfd2a79f36ebfd21f7ee0fedd672ac848a263edc10f1fd7f847158e04807",
-    "src/worker.rs": "65ad6a4bdd6a22a40c2d341ee6f039c5696fa00425f76e46419e605afdd6eacd"
+    "src/transport.rs": "96a000f971442eeb38ce9b24517d7b91014b5c28afe00aa1b3402092126fb312",
+    "src/worker.rs": "18fe9967f4a01f96bec4120a028f2f66ca6878c7b6b0e6cd90e65e620524c117"
   }
 }

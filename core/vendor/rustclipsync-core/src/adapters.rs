@@ -13,6 +13,29 @@ pub enum ClipboardError {
     Platform,
 }
 
+impl std::fmt::Display for ClipboardError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Io(_) => "clipboard I/O failed",
+            Self::TooLarge => "clipboard content exceeds the size limit",
+            Self::InvalidUtf8 => "clipboard content is not valid UTF-8",
+            Self::Timeout => "clipboard operation timed out",
+            Self::Sensitive => "sensitive clipboard content is disabled",
+            Self::Unavailable => "clipboard is unavailable",
+            Self::Platform => "platform clipboard operation failed",
+        })
+    }
+}
+
+impl std::error::Error for ClipboardError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
 pub trait Clipboard {
     /// None denotes an empty or unsupported selection. Disallowed marked text
     /// must produce Sensitive (or None), never a usable text snapshot.
