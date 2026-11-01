@@ -2,7 +2,7 @@
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::SyncSender,
+        mpsc::{SyncSender, TrySendError},
         Arc, Mutex,
     },
     thread,
@@ -37,7 +37,11 @@ impl Worker {
         thread::spawn(move || {
             let mut online = false;
             let mut delay = 1;
-            while !stopped.load(Ordering::SeqCst) {
+            let mut pending_connection = None;
+            'poll: while !stopped.load(Ordering::SeqCst) {
+                if !deliver(&events, generation, &mut pending_connection) {
+                    break;
+                }
                 let snapshot = match current.lock() {
                     Ok(value) => value.clone(),
                     Err(_) => break,
@@ -48,7 +52,10 @@ impl Worker {
                             break;
                         }
                         if !online {
-                            let _ = events.try_send((generation, Event::Connected));
+                            pending_connection = Some(Event::Connected);
+                        }
+                        if !deliver(&events, generation, &mut pending_connection) {
+                            break;
                         }
                         online = true;
                         delay = 1;
@@ -56,8 +63,10 @@ impl Worker {
                             let _ = events.try_send((generation, Event::Changed));
                             // Coalesce repeated notices while the main loop handles the revision.
                             for _ in 0..10 {
-                                if stopped.load(Ordering::SeqCst) {
-                                    break;
+                                if stopped.load(Ordering::SeqCst)
+                                    || !deliver(&events, generation, &mut pending_connection)
+                                {
+                                    break 'poll;
                                 }
                                 thread::sleep(Duration::from_millis(100));
                                 if current
@@ -71,20 +80,32 @@ impl Worker {
                     }
                     Err(Error::Status(400 | 401 | 403 | 409)) => {
                         // Wake the main loop to classify revocation or epoch mismatch.
-                        let _ = events.try_send((generation, Event::Changed));
-                        if online {
-                            let _ = events.try_send((generation, Event::Disconnected));
+                        // These are the last events: unlike recurring change notices,
+                        // they must survive a full queue before the worker exits.
+                        pending_connection = Some(Event::Disconnected);
+                        let mut changed = Some(Event::Changed);
+                        while !stopped.load(Ordering::SeqCst) {
+                            if !deliver(&events, generation, &mut pending_connection)
+                                || (pending_connection.is_none()
+                                    && !deliver(&events, generation, &mut changed))
+                                || (pending_connection.is_none() && changed.is_none())
+                            {
+                                break;
+                            }
+                            thread::sleep(Duration::from_millis(100));
                         }
                         break;
                     }
                     Err(_) => {
                         if online {
-                            let _ = events.try_send((generation, Event::Disconnected));
+                            pending_connection = Some(Event::Disconnected);
                         }
                         online = false;
                         for _ in 0..delay * 10 {
-                            if stopped.load(Ordering::SeqCst) {
-                                break;
+                            if stopped.load(Ordering::SeqCst)
+                                || !deliver(&events, generation, &mut pending_connection)
+                            {
+                                break 'poll;
                             }
                             thread::sleep(Duration::from_millis(100));
                         }
@@ -100,6 +121,25 @@ impl Worker {
         if let Ok(mut value) = self.state.lock() {
             *value = state.notification_identity();
         }
+    }
+}
+
+/// Retain the latest connection state until delivered; a closed receiver stops polling.
+fn deliver(
+    events: &SyncSender<(u64, Event)>,
+    generation: u64,
+    pending: &mut Option<Event>,
+) -> bool {
+    let Some(event) = *pending else {
+        return true;
+    };
+    match events.try_send((generation, event)) {
+        Ok(()) => {
+            *pending = None;
+            true
+        }
+        Err(TrySendError::Full(_)) => true,
+        Err(TrySendError::Disconnected(_)) => false,
     }
 }
 

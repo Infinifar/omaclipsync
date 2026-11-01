@@ -128,6 +128,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
     pub fn use_sensitive_inbox(&mut self, enabled: bool) {
         self.sensitive_inbox = enabled;
     }
+    /// Update the policy, also enforced on queued content by the next flush.
     pub fn update_policy(&mut self, filter: Filter, allow_sensitive: bool) {
         self.filter = filter;
         self.allow_sensitive = allow_sensitive;
@@ -230,6 +231,9 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
             return self.record_clear();
         }
         if text.len() > MAX_TEXT_BYTES {
+            // An unsupported new selection still supersedes the old local copy.
+            // Keep any uncertain upload until flush resolves its cancellation.
+            self.record_clear()?;
             return Err(SyncError::Remote(Error::TooLarge));
         }
         if (sensitive && !self.allow_sensitive) || !self.filter.allows(text, false) {
@@ -271,7 +275,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
     /// An explicit user action chooses the current local clipboard over the
     /// latest server value. Never silently rebase an automatic upload.
     pub fn push_now(&mut self, observed: u64) -> Result<Outcome, SyncError> {
-        if !self.persisted.paired {
+        if !self.persisted.paired || self.needs_pending_check {
             self.check()?;
         }
         let Some((text, sensitive)) = self
@@ -345,25 +349,20 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
 
     /// The caller supplies the watcher's change counter before entering this
     /// function. A new local event aborts an upload before it is sent.
+    /// Restored pending content is checked against the clipboard before sending.
     pub fn flush(&mut self, observed: u64) -> Result<Outcome, SyncError> {
-        if !self.persisted.paired {
+        if !self.persisted.paired || self.needs_pending_check {
             self.check()?;
         }
-        if !self.allow_sensitive
-            && (self
-                .persisted
-                .state
-                .queued
-                .as_ref()
-                .is_some_and(|c| c.sensitive)
-                || (self
-                    .persisted
-                    .state
-                    .pending
-                    .as_ref()
-                    .is_some_and(|p| p.copy.sensitive)
-                    && self.persisted.state.queued.is_none()))
-        {
+        let latest = self
+            .persisted
+            .state
+            .queued
+            .as_ref()
+            .or_else(|| self.persisted.state.pending.as_ref().map(|p| &p.copy));
+        if latest.is_some_and(|copy| {
+            (copy.sensitive && !self.allow_sensitive) || !self.filter.allows(&copy.text, false)
+        }) {
             self.persisted.state.local_clear();
             self.save()?;
         }
@@ -435,8 +434,11 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         Ok(Outcome::Uploaded)
     }
 
-    pub fn pull(&mut self, observed: u64, now: Instant) -> Result<Outcome, SyncError> {
-        if !self.persisted.paired {
+    /// Receive the latest message, recovering ambiguous writes as skipped.
+    /// The time argument is retained for compatibility; echo suppression starts
+    /// at the actual clipboard write, after any blocking network operations.
+    pub fn pull(&mut self, observed: u64, _now: Instant) -> Result<Outcome, SyncError> {
+        if !self.persisted.paired || self.needs_pending_check {
             self.check()?;
         }
         if self.persisted.state.pending.is_some() || self.persisted.state.applying.is_some() {
@@ -531,26 +533,34 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
             .prepare_apply(message.clone())
             .map_err(invalid_state)?;
         self.save()?;
-        if self.generation.load(Ordering::SeqCst) != observed
-            || self
-                .clipboard
+        let unchanged = if self.generation.load(Ordering::SeqCst) == observed {
+            self.clipboard
                 .snapshot(self.allow_sensitive)
-                .map_err(SyncError::Clipboard)?
-                != before
-        {
+                .map(|snapshot| snapshot == before)
+        } else {
+            Ok(false)
+        };
+        if !matches!(unchanged, Ok(true)) {
+            // No write was attempted: release the journal even if the final
+            // clipboard read failed, so the same message can be retried.
             self.persisted
                 .state
                 .finish_apply(&message.id, false)
                 .map_err(invalid_state)?;
             self.save()?;
-            return Ok(Outcome::Skipped);
+            return unchanged
+                .map(|_| Outcome::Skipped)
+                .map_err(SyncError::Clipboard);
         }
-        // If the write or subsequent save has an ambiguous outcome, leave the
-        // durable journal intact; recovery skips it instead of replaying it.
-        self.clipboard
-            .write(&text, &message.id, message.sensitive)
-            .map_err(SyncError::Clipboard)?;
-        self.echo = Some((message.id.clone(), now + Duration::from_secs(5)));
+        let written = self.clipboard.write(&text, &message.id, message.sensitive);
+        self.echo = Some((message.id.clone(), Instant::now() + Duration::from_secs(5)));
+        if let Err(error) = written {
+            // The adapter may have written before failing. Match crash recovery:
+            // persist a skipped cursor, never replay this ambiguous side effect.
+            self.persisted.state.recover_ambiguous_apply();
+            self.save()?;
+            return Err(SyncError::Clipboard(error));
+        }
         self.persisted
             .state
             .finish_apply(&message.id, true)

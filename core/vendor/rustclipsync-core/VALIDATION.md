@@ -34,3 +34,14 @@
 ## 0.2.0 本地验证
 
 新增敏感收件项的持久化、重启不重放、skipped 确认、通知无正文、条件删除与保存失败不确认测试。`cargo test --locked` 共 22 项通过，旧 Omaclipsync 状态迁移测试继续通过。Windows 原生矩阵由本次提交的 CI 另行验证。
+
+## 2026-11-01 同步边界修复验证
+
+- 修复前，新增的 6 项核心回归测试均复现失败；修复后，共享库 `cargo test --locked --all-features` 共 39 项通过，包含原有 22 项测试及旧状态迁移样本。
+- 新增覆盖策略变更后过滤待发内容、未决上传取消、慢请求回环抑制、写入结果不明时的持久化恢复、恢复保存失败、最终剪贴板读取失败、超大新复制淘汰旧内容、重启后直接同步、连接事件队列满时重试及停止。
+- `cargo fmt --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`cargo doc --locked --no-deps` 和 `git diff --check` 通过。
+- 用 `export_source.py` 将本次核心导出到客户端的临时副本：桌面 agent 的 `cargo test --locked` 为 24 项通过、5 项按原设置忽略；Omaclipsync 为 56 项通过。两者无需修改客户端 Rust 代码或依赖版本。
+- 桌面 agent 的 `cargo check --locked --all-targets --features check-windows` 通过。这是在 Linux 上检查 Windows 适配代码，不代替 Windows 原生运行验证。
+- 对现有服务器测试二进制运行 `tests/server_e2e.py` 通过：真实 HTTPS 注册、latest-only 同步、幂等重试、清空与重启、回环、敏感策略及冲突行为均通过。
+
+公开方法签名、错误枚举、HTTP 协议及 RCS1 持久化格式保持兼容。客户端验证使用临时源码副本，未替换实际客户端的 vendor 快照；本轮未运行真实桌面剪贴板、密钥环或 Windows 原生集成测试。
