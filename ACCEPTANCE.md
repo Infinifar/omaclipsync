@@ -5,7 +5,7 @@
 - 通过 `bash scripts/sync-core.sh` 更新 `core/vendor/rustclipsync-core`，纳入共享核心的 6 项同步边界修复并重新生成 `UPSTREAM.json`；`bash scripts/sync-core.sh --check` 确认逐文件及 SHA-256 与共享源码一致。
 - `cargo fmt --manifest-path core/Cargo.toml --all -- --check`、`cargo test --manifest-path core/Cargo.toml --locked`（56 项通过）、`cargo clippy --manifest-path core/Cargo.toml --locked --all-targets -- -D warnings` 及 `omarchy plugin validate` 均通过。
 - 共享核心仍为 0.2.0，公开 API、协议和持久化格式兼容，插件调用代码无需调整。依赖清单与解析版本未变，现有 `core/Cargo.lock` 通过 `--locked` 验证，无需更新。
-- 本次更新源码快照及验证记录，未替换仓库内预编译二进制、打包、部署或执行实桌验收。
+- 为满足源码与已提交程序逐字节比较的 CI 门禁，使用固定镜像的[准备构建 41279864008](https://github.com/Infinifar/omaclipsync/actions/runs/41279864008)重新编译两个原生程序，并同步 `bin/syncclipd`；`syncclipctl` 重建字节与原文件一致。正式比较仍由主分支 CI 的干净重建执行。本次未部署到桌面或执行实桌验收。
 
 ## 0.2.4 构建来源整改（2026-10-31）
 
