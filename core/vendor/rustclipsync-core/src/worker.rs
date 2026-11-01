@@ -21,7 +21,10 @@ pub enum Event {
 pub struct Worker {
     state: Arc<Mutex<Persisted>>,
     stop: Arc<AtomicBool>,
-    thread: Option<thread::JoinHandle<()>>,
+    // Only consuming join can take this private handle. Unwinding can at most
+    // detach it; no partially joined state is exposed for callers to reuse.
+    // Limit the assertion to the handle so Worker retains its unwind traits.
+    thread: Option<std::panic::AssertUnwindSafe<thread::JoinHandle<()>>>,
 }
 
 impl Worker {
@@ -118,7 +121,7 @@ impl Worker {
         Self {
             state,
             stop,
-            thread: Some(thread),
+            thread: Some(std::panic::AssertUnwindSafe(thread)),
         }
     }
 
@@ -146,7 +149,7 @@ impl Worker {
     pub fn join(mut self) -> thread::Result<()> {
         self.shutdown();
         match self.thread.take() {
-            Some(thread) => thread.join(),
+            Some(thread) => thread.0.join(),
             None => Ok(()),
         }
     }

@@ -50,4 +50,4 @@
 
 `Error`、`SyncError`、`ClipboardError` 新增 `Display`、`std::error::Error` 与包装原因的 `source()`；不新增或删除错误枚举分支，也不调整持久化格式。Worker 保存线程句柄，新增 `shutdown()` 与消费自身的 `join()`；Drop 保留不等待的行为。Transport 文档明确网络操作及完整长轮询均须有有限超时。
 
-本地 `cargo test --locked --all-features` 共 44 项通过，包含标准动态错误转换、错误链向下转型、显示脱敏、关闭时等待在途调用、满队列退出及 panic 传递测试。格式检查、严格 Clippy 与文档构建通过。新增接口测试在实现前因缺少相应 trait／方法失败。
+本地 `cargo test --locked --all-features` 共 45 项通过，包含标准动态错误转换、错误链向下转型、显示脱敏、关闭时等待在途调用、满队列退出、panic 传递及 Worker 自动 trait 兼容性测试。格式检查、严格 Clippy 与文档构建通过。新增接口测试在实现前因缺少相应 trait／方法失败；自动 trait 测试也在修复前确认失败。

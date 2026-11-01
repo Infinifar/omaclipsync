@@ -6,7 +6,7 @@
     "Cargo.toml": "df762167e355ac94bcff66caed28c4ea6a648a43fcf2545393d62e228b2e86b1",
     "LICENSE": "e2a1c93da3bd7ecef573b225d7f159213fc89440b22487d1930b4c58a99bf84c",
     "README.md": "7b4c8f273bf1bba1ad29057dc743e75655a308da33b3e5178822ef48ce7162c9",
-    "VALIDATION.md": "6b3d697505df0c43a8da376f78cd2a4c40c9f8bfc3ee9e82f4e51351d82894cc",
+    "VALIDATION.md": "ea5683b5bd7c3e04a59f3a76a3c21d63aa6608ec238ec1e4edc777b2b48fc23e",
     "src/adapters.rs": "4c87eba6a900c9a9b2ab503190d9a4542d470bb3f1ddac951126c1f94315174f",
     "src/client.rs": "1438c864ac46c902484917718359524554d79a51a0dbaf82bcdac691b032bd02",
     "src/error.rs": "1b066be5b85f8d884b06e12ef0ac195fc7b52b93f6c9564f16d0b9aed63705da",
@@ -15,6 +15,6 @@
     "src/session.rs": "3d9ca7fc500af855fc7c5140bca4cef00b4152bfb1c10ed9ffe66b0e4c148627",
     "src/state.rs": "0fb673c9ab87aa41c0ddd914ccb4f3ac2bcc076a6c8e832d339d635e0fe63251",
     "src/transport.rs": "96a000f971442eeb38ce9b24517d7b91014b5c28afe00aa1b3402092126fb312",
-    "src/worker.rs": "18fe9967f4a01f96bec4120a028f2f66ca6878c7b6b0e6cd90e65e620524c117"
+    "src/worker.rs": "20371d30e90b3c7f9c612b02b066c41728b12b3f1449ec5960d2b5f7beb2f4f9"
   }
 }
