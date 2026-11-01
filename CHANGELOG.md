@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 (2026-11-01)
+
+- Support only the current RustClipSync protocol. Remove the selectable SyncClipboard transport, its profile/file APIs, SignalR connection, fallback watcher and obsolete tests/examples.
+- Remove the protocol selector from saved settings and the panel. An existing selector is consumed without enabling any alternate transport; HTTP endpoints now use `/api/...`; encrypted state filenames and device identities remain unchanged.
+- Rename current Linux adapter modules and the real-time transport label. Retain current synchronization, sensitive inbox, history, direction and recovery behavior.
+- Address the marketplace sensitive plaintext retention finding by removing the affected transport entirely. Existing history is not automatically erased.
+
 ## 0.2.5 (2026-11-01)
 
 - Update the shared core to fix pending-upload filtering, restart validation, oversized-copy replacement, slow-download echo suppression, ambiguous clipboard write recovery and connection-event delivery under backpressure.

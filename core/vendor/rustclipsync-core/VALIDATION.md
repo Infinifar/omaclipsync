@@ -51,3 +51,10 @@
 `Error`、`SyncError`、`ClipboardError` 新增 `Display`、`std::error::Error` 与包装原因的 `source()`；不新增或删除错误枚举分支，也不调整持久化格式。Worker 保存线程句柄，新增 `shutdown()` 与消费自身的 `join()`；Drop 保留不等待的行为。Transport 文档明确网络操作及完整长轮询均须有有限超时。
 
 本地 `cargo test --locked --all-features` 共 45 项通过，包含标准动态错误转换、错误链向下转型、显示脱敏、关闭时等待在途调用、满队列退出、panic 传递及 Worker 自动 trait 兼容性测试。格式检查、严格 Clippy 与文档构建通过。新增接口测试在实现前因缺少相应 trait／方法失败；自动 trait 测试也在修复前确认失败。
+
+## 2026-11-01：统一当前 `/api` 接口
+
+- 共享核心升级为 crate 0.3.0；HTTPS 请求统一使用 `/api/...`。Rust API 类型和持久化格式未改，HTTP 地址需要与服务端及客户端配套升级。
+- 当前 45 项 Rust 测试、严格 Clippy 和 rustdoc 通过。
+- 使用临时数据库、回环 HTTPS 代理和内存剪贴板运行 `tests/server_e2e.py`，与更新后的服务端 2.0.0 互通通过：注册、最新值同步、幂等、清空/重启、回环、敏感策略和冲突。未连接用户服务器或读取实际剪贴板。
+- 桌面端和插件由同一份共享核心自动导出快照；安卓本轮仅同步接口地址，保留 Kotlin 实现。

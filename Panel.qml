@@ -111,7 +111,7 @@ Ui.Panel {
   function stateText() {
     if (service && service.busy) return strings.t("syncing")
     if (service && service.status && service.status.clipboardError === true) return strings.t("clipboard_error")
-    if (syncState === "connected" && service && (service.status.transport === "signalr" || service.status.transport === "v1")) return strings.t("connected_realtime")
+    if (syncState === "connected" && service && service.status.transport === "realtime") return strings.t("connected_realtime")
     if (syncState === "connected" && service && service.status.transport === "polling") return strings.t("connected_fallback")
     var valid = ["connected", "connecting", "offline", "credentials", "needs_config", "config_error", "paused", "clipboard_error", "daemon_stopped", "starting", "conflict", "expired", "re_pair", "storage_error"]
     return strings.t(valid.indexOf(syncState) >= 0 ? syncState : "starting")
@@ -282,7 +282,7 @@ Ui.Panel {
         if (!root.service) return
         var old = root.service.config || ({})
         var config = {
-          server: {url: urlField.text.trim(), user: userField.text.trim(), insecure: insecure, protocol: old.server ? old.server.protocol || "v1" : "v1"},
+          server: {url: urlField.text.trim(), user: userField.text.trim(), insecure: insecure},
           sync: {intervalSec: intervalValue, enabled: old.sync ? old.sync.enabled === true : true, maxInlineBytes: old.sync && old.sync.maxInlineBytes !== undefined ? old.sync.maxInlineBytes : 32768, notifyOnSuccess: notifyOnSuccess, direction: old.sync ? old.sync.direction || "both" : "both", allowSensitive: allowSensitive, autoApplySensitive: autoApplySensitive},
           filter: filterConfig(), history: {enabled: historyEnabled, limit: historyLimit},
           dedupe: {windowSec: dedupeValue}, logging: old.logging || {level: "info"}
@@ -534,7 +534,6 @@ Ui.Panel {
             Ui.Toggle { width: parent.width; label: strings.t("block_downloads"); checked: keyCatcher.blockDownloads; onClicked: keyCatcher.blockDownloads = !keyCatcher.blockDownloads }
             Ui.Toggle { width: parent.width; label: strings.t("history_enabled"); description: strings.t("history_note"); checked: keyCatcher.historyEnabled; onClicked: keyCatcher.historyEnabled = !keyCatcher.historyEnabled }
             Ui.NumberField { field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("history_limit"); from: 1; to: 1000; value: keyCatcher.historyLimit; onModified: function(v) { keyCatcher.historyLimit = v } }
-            Ui.NumberField { visible: root.service && root.service.config && root.service.config.server && root.service.config.server.protocol === "legacy"; field.locale: Qt.locale(Commons.I18n.formatLocale); label: strings.t("dedupe"); from: 0; to: 86400; value: keyCatcher.dedupeValue; onModified: function(v) { keyCatcher.dedupeValue = v } }
             Ui.Toggle { width: parent.width; label: strings.t("insecure"); description: strings.t("insecure_note"); checked: keyCatcher.insecure; onClicked: keyCatcher.insecure = !keyCatcher.insecure }
             Text { textFormat: Text.PlainText; visible: root.formError !== ""; width: parent.width; text: root.errorText(root.formError); color: Commons.Color.urgent; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall; wrapMode: Text.Wrap }
             Row {

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Isolated real-Wayland V1 integration test; never uses the user's clipboard.
+"""Isolated real-Wayland RustClipSync integration test; never uses the user's clipboard.
 
 Run with XDG_RUNTIME_DIR and WAYLAND_DISPLAY pointing to a disposable compositor:
-    RCS_TEST_DISPOSABLE_WAYLAND=1 python3 core/tests/v1_e2e.py /path/to/syncclipd /path/to/rustclipsync-server
+    RCS_TEST_DISPOSABLE_WAYLAND=1 python3 core/tests/sync_e2e.py /path/to/syncclipd /path/to/rustclipsync-server
 """
 import base64
 import contextlib
@@ -52,7 +52,7 @@ def run():
             or not os.environ.get("WAYLAND_DISPLAY") or not os.environ.get("XDG_RUNTIME_DIR")):
         raise SystemExit(__doc__)
     daemon_binary, server_binary = map(lambda x: str(Path(x).resolve()), sys.argv[1:])
-    with tempfile.TemporaryDirectory(prefix="rcs-v1-e2e-") as directory:
+    with tempfile.TemporaryDirectory(prefix="rcs-sync-e2e-") as directory:
         root = Path(directory)
         backend_port = available_port()
         proxy_port = available_port()
@@ -132,20 +132,20 @@ def run():
             token = "4b" * 32
             bearer = f"Bearer {device}:{token}"
             body = json.dumps({"deviceId": device, "deviceToken": token}).encode()
-            _, result = api("POST", "/v1/devices", basic, body, {"Content-Type": "application/json"})
+            _, result = api("POST", "/api/devices", basic, body, {"Content-Type": "application/json"})
             registration = json.loads(result)
             epoch = registration["epoch"]
             assert registration["ackRevision"] == 0
 
             def state():
-                return json.loads(api("GET", "/v1/state", bearer)[1])
+                return json.loads(api("GET", "/api/state", bearer)[1])
 
             def content(message_id):
-                return api("GET", f"/v1/messages/{message_id}/content", bearer)[1].decode()
+                return api("GET", f"/api/messages/{message_id}/content", bearer)[1].decode()
 
             def send(text, revision, message_id=None, sensitive=False):
                 message_id = message_id or str(uuid.uuid4())
-                _, result = api("PUT", f"/v1/messages/{message_id}", bearer, text.encode(),
+                _, result = api("PUT", f"/api/messages/{message_id}", bearer, text.encode(),
                                 {"X-RCS-Epoch": epoch, "X-RCS-Base-Revision": str(revision),
                                  "X-RCS-Sensitive": "1" if sensitive else "0", "Content-Type": "text/plain; charset=utf-8"})
                 return message_id, json.loads(result)
@@ -169,7 +169,7 @@ else: sys.exit(1)
             secret_tool.chmod(0o700)
             config = root / "config/omaclipsync/config.json"
             config.parent.mkdir(parents=True)
-            config.write_text(json.dumps({"server": {"url": base, "user": "fixture", "insecure": True, "protocol": "v1"},
+            config.write_text(json.dumps({"server": {"url": base, "user": "fixture", "insecure": True},
                                           "sync": {"intervalSec": 30, "enabled": True}}))
             config.chmod(0o600)
             daemon_env = os.environ.copy()
@@ -254,7 +254,7 @@ else: sys.exit(1)
             assert secret_result["revision"] == 4 and state()["sensitive"] is True
             desktop_id = status()["deviceId"]
             def desktop_ack():
-                devices = json.loads(api("GET", "/v1/devices", basic)[1])
+                devices = json.loads(api("GET", "/api/devices", basic)[1])
                 return any(item["deviceId"] == desktop_id and item["ackRevision"] >= 4 for item in devices)
             until(desktop_ack, "sensitive skip was not acknowledged")
             assert paste() is None, "sensitive content was received despite the default policy"
@@ -303,7 +303,7 @@ else: sys.exit(1)
             until(lambda: state()["revision"] == 8, "new copy after recovery was not uploaded", timeout=30)
             assert content(state()["messageId"]) == "fresh-after-restart"
             old_device = status()["deviceId"]
-            assert api("DELETE", f"/v1/devices/{old_device}", basic)[0] == 204
+            assert api("DELETE", f"/api/devices/{old_device}", basic)[0] == 204
             until(lambda: status().get("state") == "re_pair", "revocation was not detected", timeout=40)
             assert rpc("re_pair", {"confirm": False}).get("error") == "confirmation_required"
             assert rpc("re_pair", {"confirm": True}).get("ok") is True
@@ -395,7 +395,7 @@ else: sys.exit(1)
             assert rpc("history")["result"]["entries"] == [], "sensitive upload entered history"
             logs = b"".join(p.read_bytes() for p in (root / "state").rglob("*.jsonl"))
             assert b"inbox-sensitive-fixture" not in logs and b"sensitive-upload-with-history" not in logs
-            print("PASS: V1 recovery and pairing; sensitive inbox restart, latest-only, metadata-only status, bounded reads, stale IDs, marked full copy without upload, delete without replay, automatic mode and sensitive-history exclusion")
+            print("PASS: RustClipSync recovery and pairing; sensitive inbox restart, latest-only, metadata-only status, bounded reads, stale IDs, marked full copy without upload, delete without replay, automatic mode and sensitive-history exclusion")
         finally:
             if daemon is not None:
                 daemon.terminate()

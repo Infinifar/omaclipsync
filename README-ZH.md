@@ -32,6 +32,8 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
   <img src="assets/screenshots/receive-mode.png" alt="允许敏感同步开启、自动写入剪贴板关闭" width="578">
 </p>
 
+仅支持当前 RustClipSync 协议，不提供协议选择项或 SyncClipboard 兼容传输；HTTP 接口统一使用 `/api/...` 前缀。
+
 ## 特点
 
 - **实时接收，事件驱动推送**：本机复制由 Wayland data-control 事件触发；远端变化通过 HTTPS 长轮询通知，随后读取最新内容。
@@ -221,7 +223,7 @@ gjs tests/inbox.test.js Inbox.js
 cargo clippy --manifest-path core/Cargo.toml --locked --all-targets -- -D warnings
 cargo build --manifest-path core/Cargo.toml --locked --bin syncclipd
 # 在隔离 Wayland 合成器中设置 RCS_TEST_DISPOSABLE_WAYLAND=1 后，可执行：
-python3 core/tests/v1_e2e.py "$PWD/core/target/debug/syncclipd" /path/to/rustclipsync-server
+python3 core/tests/sync_e2e.py "$PWD/core/target/debug/syncclipd" /path/to/rustclipsync-server
 ./scripts/package.sh
 omarchy plugin validate "$PWD"
 ```

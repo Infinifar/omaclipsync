@@ -1,45 +1,30 @@
-# Native change review guide
+# Native review guide
 
-Plugin: `io.github.infinifar.omaclipsync`. Baseline: marketplace-listed commit `371294deb092657a67f02a8fcfed1621e9340595` (0.1.6). Previous pending target: `72a0b6e651748b912055ad79a1ac5653caa74dd8` (0.2.3). The 0.2.4 remediation changes build provenance and the package version; it does not add synchronization behavior. This guide is an inventory for the maintainer's security review, **not** independent approval.
+Plugin: `io.github.infinifar.omaclipsync`. This candidate supports only the current RustClipSync protocol, using `/api/...`. The prior marketplace target was `0015474841a5819afd6ce897312fa193cd471b80` (0.2.5). This inventory supports maintainer review; it is not independent security approval.
 
-## Scope and source boundaries
+## Removed capabilities and the retention finding
 
-From the listed baseline, the native delta adds RustClipSync V1 and the sensitive inbox, then extracts the portable engine into a committed source snapshot. It is not just a screenshot/QML update. Review all of the following groups:
+The old SyncClipboard transport is removed, including profile/file APIs, SignalR, the fallback `wl-paste` subprocess/helper, the old local upload/history session, its engine and obsolete tests/examples. The daemon cannot select that transport. This removes the sensitive plaintext history path identified by the reviewer instead of retaining another compatibility implementation.
 
-| Files | Behavior and review boundary |
+The panel no longer saves a protocol selector. A previously saved `server.protocol` field is consumed and discarded; it never selects a transport and is absent from serialized settings. Other unknown server fields still fail validation. The current protocol's marked uploads/receives continue to use `HistorySink::record_marked`; marked text is excluded from ordinary plaintext history. Previously stored history is not automatically erased.
+
+## Current source boundaries
+
+| Files | Review boundary |
 | --- | --- |
-| `core/src/bin/syncclipd.rs` | Selects V1/legacy engine, pairing/credential state, receive/retry scheduling, event handling, configuration transitions, inbox IPC, and shutdown. Fixed-size main event queue; stale watcher/notification generations are ignored. |
-| `core/src/config.rs` | Explicit `v1` / `legacy` protocol, V1 default; sensitive synchronization defaults off. New configs default to inbox mode; existing serialized sync configs missing `autoApplySensitive` retain the prior automatic clipboard behavior. |
-| `core/src/v1_session.rs`, `v1_state.rs`, `v1_client.rs`, `v1_worker.rs` | Linux adapters/re-exports: Wayland clipboard, per-server/user Secret Service state key, bounded private encrypted state storage. Failed key lookup for existing state does not replace its key. Explicit inbox copy uses the device origin marker and cancels queued upload. |
-| `core/vendor/rustclipsync-core/src/client.rs`, `transport.rs`, `worker.rs` | V1 HTTPS transport: Basic auth for registration, device bearer identity afterward; metadata long polling. HTTPS-only base URL without credentials/query/fragment; redirects disabled. Normal request timeout 10 s, changes timeout 30 s, metadata bounded to 16 KiB, text bounded to 10 MiB. Reconnection backs off up to 30 s. Worker cancellation waits for an in-flight bounded request to finish. |
-| `core/vendor/rustclipsync-core/src/session.rs`, `state.rs` | Durable outbox/cursor/ack state, epoch and revision checks, stale-response/clipboard generation checks, re-pair and restart recovery, latest sensitive inbox. State is AES-256-GCM via ring with random 96-bit nonce and authenticated format marker, limited to 64 MiB; text fields have bounded Base64 encoding. Encryption key is held separately in Secret Service. This is local encryption, not end-to-end server encryption. |
-| `core/vendor/rustclipsync-core/src/adapters.rs`, `filter.rs`, `lib.rs`, `error.rs` | Shared adapter contracts, outcome/filter definitions and error classification. The snapshot is version 0.2.0; `UPSTREAM.json` records origin and file hashes. Builds never fetch or execute the sibling project or a remote shared-core checkout. |
-| `core/src/inbox.rs`, `history.rs` | General status includes inbox ID/time only. Explicit ID-checked reads return at most 16 KiB UTF-8 chunks; copy and delete also check current ID. Sensitive V1 uploads/downloads do not enter normal history. Ordinary history is still plaintext if the user enables it. |
-| `core/src/wayland.rs` | Regular selection only; password-manager hint and origin MIME markers, V1 clear events, input size/read timeout, sensitive write marker. A MIME hint is an application convention, not reliable detection of every secret. |
-| `core/src/session.rs`, `signalr.rs`, `lib.rs` | Legacy SyncClipboard path remains explicit: sensitivity policy for local reading; shared filter/outcome re-exports and existing SignalR support. Legacy servers do not provide V1 sensitive-receipt metadata or the inbox protocol. |
-| `core/src/storage.rs` | Private atomic binary state writes without appending an extra newline; file sync plus containing-directory sync in the V1 adapter. |
-| `core/Cargo.toml`, `Cargo.lock` | New local path dependency and its crypto dependencies are locked; review the lockfile delta, crate checksums, and image toolchain as supply-chain inputs. |
-| `core/tests/`, shared snapshot `VALIDATION.md` | Mocked protocol/recovery tests and isolated V1 integration harness. These provide regression evidence and do not replace review of production paths. |
+| `core/src/bin/syncclipd.rs` | One shared-core session; pairing, configuration, bounded event queues, notification generation checks, recovery, direction controls and ID-checked inbox requests. Enabling the plugin immediately starts this bundled native daemon through `Service.qml`. |
+| `core/src/session.rs`, `state.rs`, `client.rs`, `worker.rs` | Linux adapters/re-exports for the shared engine: native Wayland, per-account Secret Service key, bounded encrypted state and durable directory sync. Explicit inbox copy carries an origin marker and cancels pending upload. |
+| `core/vendor/rustclipsync-core/` | Automatically exported core 0.3.0 source snapshot, verified by `UPSTREAM.json` file hashes. The authoritative transport/state implementation is maintained in the separate shared-core repository; consumer copies are not edited by hand. |
+| `core/src/config.rs`, `history.rs`, `inbox.rs` | Strict config validation, bounded optional history and five favorites, metadata-only inbox status, bounded explicit preview chunks and stale-ID rejection. Ordinary history remains plaintext when enabled. |
+| `core/src/wayland.rs` | Regular clipboard only, native data-control events and same-offer sensitivity/origin hints, bounded reads and timeout. Failure to establish the native watcher pauses synchronization. A sensitivity hint cannot identify every secret. |
+| `Panel.qml`, `Service.qml` | Real-time status is named `realtime`; no protocol/version selector. Explicit reveal uses plain text, 64 KiB maximum preview, full-text copy stays native, and reveal is cleared on close/replacement/disconnection. |
 
-`core/src/bin/syncclipctl.rs` is unchanged from the listed baseline. Its binary still changes because of package/dependency/toolchain inputs. It delegates fixed commands to the existing `omarchy-shell` process and reads configuration; it does not start another daemon. Both committed binaries therefore require a fresh comparison.
+The shared transport performs HTTPS Basic registration at `/api/devices`, then device bearer authentication for state, changes, message and ack routes. Redirects are disabled; ordinary requests time out after 10 s, long polls after 30 s; metadata is limited to 16 KiB and text to 10 MiB. TLS verification is enabled unless the user explicitly chooses the insecure setting. There is no telemetry destination or downloaded executable.
 
-## Execution, persistence and networking
+`/api/...` replaces the former endpoint prefix across the service and clients. Device identities, cursor format, AES-256-GCM encrypted state, keyring accounts, state filenames and clipboard-origin marker strings are retained. Those opaque local identifiers are not transport selectors and changing them would unnecessarily lose pairing/echo state. The shared core's immutable source snapshot contains the complete network logic.
 
-- `Service.qml` starts the plugin-relative `bin/syncclipd` when the service is instantiated/enabled (`Component.onCompleted: launch()` and `Process.command`). It sends JSON requests over stdin/stdout, bounds restart attempts/backoff, and requests shutdown on destruction. A cloned/enabled plugin therefore executes native code immediately. There is no sandbox or deferred installer approval.
-- Native subprocess capabilities include Secret Service through `secret-tool` and clipboard fallback through `wl-paste`/the current executable; the QML layer also delegates explicit history paste to existing desktop tools. They use fixed command/argument arrays, not shell interpolation of clipboard text. These pre-existing capabilities remain relevant to review.
-- V1 accesses the user-configured HTTPS server's `/v1/devices`, `/v1/state`, `/v1/changes`, message content/upload/cancel, and ack routes under the configured base. It is an opt-in destination via account configuration, not a fixed third-party telemetry endpoint. TLS verification is on by default; the pre-existing explicit insecure setting weakens it and must be reviewed separately.
-- Configuration, encrypted pending/inbox state, optional plaintext normal history and redacted logs persist under the user's XDG directories. Per-account state keys/passwords are stored via Secret Service. Deleting an inbox item removes that local item; it is not secure erasure of backups or server-side deletion.
-- Remote sensitive text is delivered to QML only after an explicit reveal request; preview is capped at 64 KiB and rendered as plain text. It may remain in process memory. Explicit copy writes the full item to the system clipboard with a sensitivity hint, where other permitted desktop clients can access it.
+Secret Service still uses a bounded `secret-tool` subprocess with password on stdin. The thin `syncclipctl` delegates fixed commands to the existing shell and does not start another daemon. History paste delegates explicit user actions to existing desktop tools. Plugin code runs with the user's unsandboxed privileges; plaintext may exist in process memory or the system clipboard. Local encryption is not server end-to-end encryption. Inbox deletion does not erase backups or server data.
 
-## Build evidence and remaining approval
+## Verification and approval boundary
 
-The former release workflow only packaged committed bytes. Version 0.2.4 introduces an immutable-image clean build, compares both outputs byte for byte, and packages those compared outputs; see [REPRODUCIBLE-BUILD.md](REPRODUCIBLE-BUILD.md). No existing release tag is rewritten, and there is no claim that the 0.2.3 bytes were independently reproduced.
-
-To inspect the full native delta at an exact candidate commit:
-
-```sh
-git diff --stat 371294deb092657a67f02a8fcfed1621e9340595 <candidate> -- core Service.qml bin scripts .github .gitlab-ci.yml
-git diff 371294deb092657a67f02a8fcfed1621e9340595 <candidate> -- core Service.qml
-```
-
-Marketplace approval remains with its maintainer. A successful workflow, hashes, upstream export metadata, or this author's inventory must not be described as an independent security approval. Desktop behavior was validated on earlier versions; a reproducible build alone does not repeat the desktop or Android test matrix.
+The fixed-image release build must compare both committed executables byte for byte before verified packaging. See [REPRODUCIBLE-BUILD.md](REPRODUCIBLE-BUILD.md). Current tests cover the removed selector, current HTTPS transport, durable recovery and sensitive-history/inbox behavior; see [ACCEPTANCE.md](ACCEPTANCE.md) for actual results and desktop limits. Approval remains with the marketplace maintainer for the exact candidate commit. The author does not apply an approval label.

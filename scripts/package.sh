@@ -40,7 +40,7 @@ cp "$root/manifest.json" "$root/Service.qml" "$root/BarWidget.qml" "$root/Panel.
 cp -R "$root/assets" "$stage/assets"
 cp -R "$root/third-party-licenses" "$stage/third-party-licenses"
 cp -R "$root/i18n" "$stage/i18n"
-cp -R "$root/core/src" "$root/core/tests" "$root/core/examples" "$root/core/Cargo.toml" "$root/core/Cargo.lock" "$stage/core/"
+cp -R "$root/core/src" "$root/core/tests" "$root/core/Cargo.toml" "$root/core/Cargo.lock" "$stage/core/"
 cp -R "$root/core/vendor" "$stage/core/vendor"
 cp "$root/scripts/package.sh" "$root/scripts/qmllint.sh" "$root/scripts/reproducible-build.sh" "$stage/scripts/"
 cp "$root/tests/settings.test.js" "$root/tests/settings.gjs" "$root/tests/inbox.test.js" "$stage/tests/"

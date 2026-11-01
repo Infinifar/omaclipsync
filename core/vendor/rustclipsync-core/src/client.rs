@@ -167,7 +167,7 @@ impl Client {
         }
         let request = self
             .http
-            .post(self.url("v1/devices")?)
+            .post(self.url("api/devices")?)
             .basic_auth(&self.user, Some(&self.password))
             .json(&Register {
                 device_id: &session.state.device_id,
@@ -181,7 +181,7 @@ impl Client {
     }
 
     pub fn state(&self, session: &Persisted) -> Result<RemoteState, Error> {
-        let request = self.bearer(self.http.get(self.url("v1/state")?), session);
+        let request = self.bearer(self.http.get(self.url("api/state")?), session);
         Self::json::<RemoteState>(Self::perform(request)?)?.validate()
     }
 
@@ -190,7 +190,7 @@ impl Client {
             return Err(Error::InvalidProfile);
         }
         let request = self
-            .bearer(self.http.get(self.url("v1/changes")?), session)
+            .bearer(self.http.get(self.url("api/changes")?), session)
             .query(&[
                 ("epoch", session.state.epoch.as_str()),
                 ("after", &session.state.cursor.to_string()),
@@ -209,7 +209,7 @@ impl Client {
         }
         let request = self.bearer(
             self.http
-                .get(self.url(&format!("v1/messages/{}/content", message.id))?),
+                .get(self.url(&format!("api/messages/{}/content", message.id))?),
             session,
         );
         String::from_utf8(Self::bytes(Self::perform(request)?, MAX_TEXT_BYTES as u64)?)
@@ -226,7 +226,7 @@ impl Client {
         let request = self
             .bearer(
                 self.http
-                    .put(self.url(&format!("v1/messages/{}", outbox.copy.id))?),
+                    .put(self.url(&format!("api/messages/{}", outbox.copy.id))?),
                 session,
             )
             .header("x-rcs-epoch", &session.state.epoch)
@@ -255,7 +255,7 @@ impl Client {
         let request = self
             .bearer(
                 self.http
-                    .delete(self.url(&format!("v1/messages/{}", outbox.copy.id))?),
+                    .delete(self.url(&format!("api/messages/{}", outbox.copy.id))?),
                 session,
             )
             .header("x-rcs-epoch", &session.state.epoch);
@@ -275,7 +275,7 @@ impl Client {
             return Err(Error::InvalidProfile);
         }
         let request = self
-            .bearer(self.http.post(self.url("v1/ack")?), session)
+            .bearer(self.http.post(self.url("api/ack")?), session)
             .json(&Acknowledge {
                 epoch: &session.state.epoch,
                 revision: ack.revision,

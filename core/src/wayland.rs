@@ -11,7 +11,7 @@ use wl_clipboard_rs::{
 };
 
 pub const MIME: &str = "text/plain;charset=utf-8";
-pub const V1_ORIGIN_PREFIX: &str = "application/x-rustclipsync-v1-";
+pub const ORIGIN_PREFIX: &str = "application/x-rustclipsync-v1-";
 pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
@@ -48,42 +48,8 @@ pub fn create_watcher() -> Result<Watcher, ClipboardError> {
     )?)
 }
 
-/// Drive on a dedicated thread; the caller holds `watcher.cancel_handle()` for shutdown.
-/// The initial selection is not an observed copy and is skipped, so starting the
-/// daemon cannot overwrite a newer server selection with an old local clipboard.
-/// Unavailable MIME types and cleared selections are ignored. An oversized, invalid,
-/// or stalled offer is reported without exposing its contents and watching continues.
-pub fn watch_loop(
-    mut watcher: Watcher,
-    allow_sensitive: bool,
-    mut on_text: impl FnMut(Result<String, ClipboardError>),
-) -> Result<(), ClipboardError> {
-    let mut initial = true;
-    while let Some(event) = watcher.next_event()? {
-        if initial {
-            initial = false;
-            continue;
-        }
-        if let ClipboardEvent::Changed {
-            mime_types,
-            mut offer,
-            ..
-        } = event
-        {
-            if safe_text_offer(&mime_types, allow_sensitive) {
-                let result = offer
-                    .receive(MIME)
-                    .map_err(ClipboardError::from)
-                    .and_then(|reader| read_bounded(reader, MAX_TEXT_BYTES, READ_TIMEOUT));
-                on_text(result);
-            }
-        }
-    }
-    Ok(())
-}
-
 #[derive(Debug, PartialEq, Eq)]
-pub enum V1ClipboardChange {
+pub enum ClipboardChange {
     Text {
         text: String,
         origin: Option<String>,
@@ -92,14 +58,14 @@ pub enum V1ClipboardChange {
     Cleared,
 }
 
-/// V1 needs to observe clears and blocked sensitive offers as well as text.
+/// Observe clears and blocked sensitive offers as well as text.
 /// `changed` runs before reading the offer, allowing concurrent downloads to
 /// reject responses that started before a newer local selection.
-pub fn watch_loop_v1(
+pub fn watch_loop(
     mut watcher: Watcher,
     allow_sensitive: bool,
     mut changed: impl FnMut(),
-    mut on_change: impl FnMut(Result<V1ClipboardChange, ClipboardError>),
+    mut on_change: impl FnMut(Result<ClipboardChange, ClipboardError>),
 ) -> Result<(), ClipboardError> {
     let mut initial = true;
     while let Some(event) = watcher.next_event()? {
@@ -109,19 +75,19 @@ pub fn watch_loop_v1(
         }
         changed();
         match event {
-            ClipboardEvent::Cleared { .. } => on_change(Ok(V1ClipboardChange::Cleared)),
+            ClipboardEvent::Cleared { .. } => on_change(Ok(ClipboardChange::Cleared)),
             ClipboardEvent::Changed {
                 mime_types,
                 mut offer,
                 ..
             } => {
                 if !safe_text_offer(&mime_types, allow_sensitive) {
-                    on_change(Ok(V1ClipboardChange::Cleared));
+                    on_change(Ok(ClipboardChange::Cleared));
                     continue;
                 }
                 let origin = mime_types
                     .iter()
-                    .find_map(|mime| mime.strip_prefix(V1_ORIGIN_PREFIX))
+                    .find_map(|mime| mime.strip_prefix(ORIGIN_PREFIX))
                     .filter(|id| {
                         id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
                     })
@@ -133,7 +99,7 @@ pub fn watch_loop_v1(
                     .receive(MIME)
                     .map_err(ClipboardError::from)
                     .and_then(|reader| read_bounded(reader, MAX_TEXT_BYTES, READ_TIMEOUT));
-                on_change(text.map(|text| V1ClipboardChange::Text {
+                on_change(text.map(|text| ClipboardChange::Text {
                     text,
                     origin,
                     sensitive,
@@ -222,7 +188,7 @@ pub fn write_text_marked(
         },
         copy::MimeSource {
             source: copy::Source::Bytes(Box::new([])),
-            mime_type: copy::MimeType::Specific(format!("{V1_ORIGIN_PREFIX}{message_id}")),
+            mime_type: copy::MimeType::Specific(format!("{ORIGIN_PREFIX}{message_id}")),
         },
     ];
     if sensitive {

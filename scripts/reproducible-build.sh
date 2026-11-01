@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild in a digest-pinned compiler + linker environment; never execute the binaries.
+# Test source fixtures, then rebuild release bytes in a fixed compiler/linker environment.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 image='mirror.gcr.io/library/rust@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b'
@@ -43,6 +43,7 @@ fi
   cargo -V
   cc --version | head -1
   ld --version | head -1
+  cargo test --manifest-path core/Cargo.toml --locked --offline
   cargo build --manifest-path core/Cargo.toml --locked --offline --release --bins
 ' > "$root/dist/BUILDINFO.txt" 2>&1 || { cat "$root/dist/BUILDINFO.txt" >&2; exit 1; }
 out="$root/dist/native"

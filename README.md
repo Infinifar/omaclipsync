@@ -32,6 +32,8 @@ Screenshots were captured from the real Omarchy plugin in English. Server detail
   <img src="assets/screenshots/receive-mode.png" alt="Sensitive sync allowed and automatic clipboard writing disabled" width="578">
 </p>
 
+Only the current RustClipSync protocol is supported; there is no protocol selector or SyncClipboard compatibility transport. HTTP endpoints use `/api/...`; update the server and clients together.
+
 ## Features
 
 - **Real-time receive and event-driven push**: local copies use Wayland data-control events. HTTPS long polling signals remote changes, after which the client retrieves the latest value.
@@ -221,7 +223,7 @@ gjs tests/inbox.test.js Inbox.js
 cargo clippy --manifest-path core/Cargo.toml --locked --all-targets -- -D warnings
 cargo build --manifest-path core/Cargo.toml --locked --bin syncclipd
 # With an isolated Wayland compositor and RCS_TEST_DISPOSABLE_WAYLAND=1:
-python3 core/tests/v1_e2e.py "$PWD/core/target/debug/syncclipd" /path/to/rustclipsync-server
+python3 core/tests/sync_e2e.py "$PWD/core/target/debug/syncclipd" /path/to/rustclipsync-server
 ./scripts/package.sh
 omarchy plugin validate "$PWD"
 ```

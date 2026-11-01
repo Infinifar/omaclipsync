@@ -1,22 +1,21 @@
 //! Shell-owned daemon. Stdout is exclusively the versioned JSON-lines protocol.
 use chrono::Utc;
 use omaclipsync_core::{
-    config::{Config, ConfigError, ServerProtocol, SyncDirection},
+    config::{Config, ConfigError, SyncDirection},
     history::{Entry, History, HistoryError},
     inbox, keyring,
     logging::{Event, Level, Logger},
     protocol::{self, Request},
-    session::{Outcome, Session, SyncError, WaylandClipboard},
-    signalr::{self, Event as SignalEvent},
-    v1_session::{self, V1Error},
-    v1_worker, wayland, Error, Server,
+    session::{self, SyncError},
+    wayland,
+    worker::{self, Event as NotificationEvent},
+    Error, Outcome,
 };
 use serde_json::{json, Value};
 use std::{
     env, fs,
-    io::{self, BufReader, Read, Write},
+    io::{self, BufReader, Write},
     path::PathBuf,
-    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender},
@@ -28,26 +27,13 @@ use std::{
 use wl_clipboard_rs::watch::CancelHandle;
 
 const ID: &str = "omaclipsync";
-type LiveSession = Session<Server, WaylandClipboard>;
-struct SignalOptions {
-    url: String,
-    user: String,
-    password: String,
-    insecure: bool,
-}
 enum WatchCancel {
     Native(CancelHandle),
-    Fallback(Arc<Mutex<Child>>),
 }
 impl WatchCancel {
     fn cancel(self) {
         match self {
             Self::Native(handle) => handle.cancel(),
-            Self::Fallback(child) => {
-                if let Ok(mut child) = child.lock() {
-                    let _ = child.kill();
-                }
-            }
         }
     }
 }
@@ -87,11 +73,10 @@ impl Paths {
 struct App {
     paths: Paths,
     config: Config,
-    session: Option<LiveSession>,
-    v1: Option<v1_session::Session<v1_session::WaylandClipboard>>,
-    v1_worker: Option<v1_worker::Worker>,
-    v1_conflict: bool,
-    v1_latest: Arc<Mutex<Option<(u64, u64, wayland::V1ClipboardChange)>>>,
+    session: Option<session::Session<session::WaylandClipboard>>,
+    worker: Option<worker::Worker>,
+    conflict: bool,
+    clipboard_latest: Arc<Mutex<Option<(u64, u64, wayland::ClipboardChange)>>>,
     clipboard_serial: Arc<AtomicU64>,
     processed_clipboard_serial: u64,
     active_watcher: Arc<Mutex<u64>>,
@@ -101,19 +86,15 @@ struct App {
     logger: Logger,
     next_poll: Instant,
     next_fallback: Instant,
-    next_signal_pull: Instant,
+    next_notification_pull: Instant,
     pull_pending: bool,
-    signal_tx: SyncSender<(u64, SignalEvent)>,
-    signal_rx: Receiver<(u64, SignalEvent)>,
-    signal_generation: u64,
-    signal_connected: bool,
-    signal_options: Option<SignalOptions>,
-    signal_worker: Option<signalr::Worker>,
+    notification_tx: SyncSender<(u64, NotificationEvent)>,
+    notification_rx: Receiver<(u64, NotificationEvent)>,
+    notification_generation: u64,
+    notification_connected: bool,
     next_config_check: Instant,
     backoff: u64,
     config_stamp: Option<(SystemTime, u64)>,
-    pending: Option<String>,
-    latest: Arc<Mutex<Option<(u64, String)>>>,
     sender: SyncSender<Message>,
     watcher_active: bool,
     watcher_cancel: Option<WatchCancel>,
@@ -126,23 +107,17 @@ struct App {
     config_revision: u64,
 }
 impl App {
-    fn new(
-        paths: Paths,
-        sender: SyncSender<Message>,
-        latest: Arc<Mutex<Option<(u64, String)>>>,
-        verbose: bool,
-    ) -> Self {
+    fn new(paths: Paths, sender: SyncSender<Message>, verbose: bool) -> Self {
         let logger = Logger::new(&paths.logs);
         let now = Instant::now();
-        let (signal_tx, signal_rx) = mpsc::sync_channel(32);
+        let (notification_tx, notification_rx) = mpsc::sync_channel(32);
         let mut app = Self {
             paths,
             config: Config::default(),
             session: None,
-            v1: None,
-            v1_worker: None,
-            v1_conflict: false,
-            v1_latest: Arc::new(Mutex::new(None)),
+            worker: None,
+            conflict: false,
+            clipboard_latest: Arc::new(Mutex::new(None)),
             clipboard_serial: Arc::new(AtomicU64::new(0)),
             processed_clipboard_serial: 0,
             active_watcher: Arc::new(Mutex::new(0)),
@@ -152,19 +127,15 @@ impl App {
             logger,
             next_poll: now,
             next_fallback: now,
-            next_signal_pull: now,
+            next_notification_pull: now,
             pull_pending: false,
-            signal_tx,
-            signal_rx,
-            signal_generation: 0,
-            signal_connected: false,
-            signal_options: None,
-            signal_worker: None,
+            notification_tx,
+            notification_rx,
+            notification_generation: 0,
+            notification_connected: false,
             next_config_check: now,
             backoff: 1,
             config_stamp: None,
-            pending: None,
-            latest,
             sender,
             watcher_active: false,
             watcher_cancel: None,
@@ -193,9 +164,8 @@ impl App {
             Ok(c) => c,
             Err(ConfigError::Io(e)) if e.kind() == io::ErrorKind::NotFound => Config::default(),
             Err(_) => {
-                self.stop_signalr();
+                self.stop_notifications();
                 self.session = None;
-                self.v1 = None;
                 self.state = "config_error";
                 self.log(Event::ConfigError);
                 self.stop_watcher();
@@ -205,28 +175,18 @@ impl App {
         self.apply(config);
     }
     fn apply(&mut self, config: Config) {
-        self.stop_signalr();
-        let use_v1 = config.server.protocol == ServerProtocol::V1;
-        if use_v1 != self.v1.is_some() {
-            self.stop_watcher();
-        }
-        self.v1 = None;
-        self.v1_conflict = false;
+        self.stop_notifications();
+        self.stop_watcher();
+        self.session = None;
+        self.conflict = false;
         // A watcher captures this policy at startup. Cancel it and discard
         // queued clipboard data before adopting a changed sensitive policy.
         if self.config.sync.allow_sensitive != config.sync.allow_sensitive {
             self.stop_watcher();
         }
-        if self.config.sync.direction != config.sync.direction {
-            self.pending = None;
-            if let Ok(mut latest) = self.latest.lock() {
-                *latest = None;
-            }
-        }
         let filter = match config.validate() {
             Ok(f) => f,
             Err(_) => {
-                self.session = None;
                 self.state = "config_error";
                 self.stop_watcher();
                 return;
@@ -239,7 +199,6 @@ impl App {
         ) {
             Ok(h) => h,
             Err(_) => {
-                self.session = None;
                 self.state = "config_error";
                 self.stop_watcher();
                 return;
@@ -254,7 +213,6 @@ impl App {
             Level::parse(&self.config.logging.level).unwrap_or(Level::Info)
         });
         if !ready {
-            self.session = None;
             self.state = "needs_config";
             self.stop_watcher();
             return;
@@ -262,105 +220,34 @@ impl App {
         let password = match keyring::lookup(&self.config.server.user) {
             Ok(v) => v,
             Err(_) => {
-                self.session = None;
                 self.state = "credentials";
                 self.stop_watcher();
                 return;
             }
         };
-        if !use_v1 && self.config.sync.enabled && self.config.sync.direction.can_receive() {
-            self.signal_options = Some(SignalOptions {
-                url: self.config.server.url.clone(),
-                user: self.config.server.user.clone(),
-                password: password.clone(),
-                insecure: self.config.server.insecure,
-            });
-        }
-        let server = match Server::with_tls(
+        match session::Session::open(
             &self.config.server.url,
-            self.config.server.user.clone(),
-            password.clone(),
+            &self.config.server.user,
+            password,
             self.config.server.insecure,
+            &self.paths.logs,
+            session::WaylandClipboard,
+            filter,
+            self.config.sync.allow_sensitive,
+            history,
+            Arc::clone(&self.clipboard_serial),
         ) {
-            Ok(s) => s,
-            Err(_) => {
-                self.stop_signalr();
-                self.session = None;
-                self.state = "config_error";
-                self.stop_watcher();
+            Ok(mut session) => {
+                session.use_sensitive_inbox(!self.config.sync.auto_apply_sensitive);
+                self.session = Some(session);
+            }
+            Err(SyncError::Credentials) => {
+                self.state = "credentials";
                 return;
             }
-        };
-        let window = Duration::from_secs(self.config.dedupe.window_sec);
-        if let Some(session) = self.session.as_mut() {
-            session.remote = server;
-            session.history = history;
-            session.max_inline = self.config.sync.max_inline_bytes;
-            session
-                .engine
-                .reconfigure(filter, window, self.config.sync.enabled);
-        } else {
-            self.session = Some(Session::new(
-                server,
-                WaylandClipboard,
-                filter,
-                window,
-                self.config.sync.enabled,
-                self.config.sync.max_inline_bytes,
-                history,
-            ));
-        }
-        if use_v1 {
-            let history = match History::new(
-                &self.paths.history,
-                self.config.history.enabled,
-                self.config.history.limit,
-            ) {
-                Ok(history) => history,
-                Err(_) => {
-                    self.session = None;
-                    self.state = "config_error";
-                    self.stop_watcher();
-                    return;
-                }
-            };
-            let filter = match self.config.validate() {
-                Ok(filter) => filter,
-                Err(_) => {
-                    self.session = None;
-                    self.state = "config_error";
-                    self.stop_watcher();
-                    return;
-                }
-            };
-            match v1_session::Session::open(
-                &self.config.server.url,
-                &self.config.server.user,
-                password,
-                self.config.server.insecure,
-                &self.paths.logs,
-                v1_session::WaylandClipboard,
-                filter,
-                self.config.sync.allow_sensitive,
-                history,
-                Arc::clone(&self.clipboard_serial),
-            ) {
-                Ok(mut session) => {
-                    session.use_sensitive_inbox(!self.config.sync.auto_apply_sensitive);
-                    self.v1 = Some(session);
-                }
-                Err(V1Error::Credentials) => {
-                    self.session = None;
-                    self.state = "credentials";
-                    self.stop_watcher();
-                    return;
-                }
-                Err(_) => {
-                    self.session = None;
-                    self.state = "config_error";
-                    self.stop_watcher();
-                    return;
-                }
+            Err(_) => {
+                self.state = "config_error";
+                return;
             }
         }
         self.state = if self.config.sync.enabled {
@@ -372,51 +259,49 @@ impl App {
         self.needs_check = true;
         self.pull_pending = true;
         self.next_fallback = Instant::now();
-        self.next_signal_pull = Instant::now();
+        self.next_notification_pull = Instant::now();
         // Let the host complete the protocol handshake before any network request.
         self.next_poll = Instant::now() + Duration::from_secs(1);
         if !self.config.sync.enabled {
             self.stop_watcher();
         }
     }
-    fn stop_signalr(&mut self) {
-        self.signal_generation = self.signal_generation.wrapping_add(1);
-        self.signal_connected = false;
-        self.signal_options = None;
-        self.signal_worker = None;
-        self.v1_worker = None;
-        while self.signal_rx.try_recv().is_ok() {}
+    fn stop_notifications(&mut self) {
+        self.notification_generation = self.notification_generation.wrapping_add(1);
+        self.notification_connected = false;
+        self.worker = None;
+        while self.notification_rx.try_recv().is_ok() {}
     }
     fn fallback_interval(&self) -> Duration {
         Duration::from_secs(self.config.sync.interval_sec.clamp(30, 300))
     }
-    fn signal_events(&mut self, now: Instant) {
+    fn notification_events(&mut self, now: Instant) {
         // Bound work per tick even if an untrusted server floods notifications.
         for _ in 0..64 {
-            let Ok((generation, event)) = self.signal_rx.try_recv() else {
+            let Ok((generation, event)) = self.notification_rx.try_recv() else {
                 break;
             };
-            if generation != self.signal_generation || !self.wants_watcher() {
+            if generation != self.notification_generation || !self.wants_watcher() {
                 continue;
             }
             match event {
-                SignalEvent::Connected => {
-                    self.signal_connected = true;
+                NotificationEvent::Connected => {
+                    self.notification_connected = true;
                     self.pull_pending = true;
-                    self.next_signal_pull = now;
+                    self.next_notification_pull = now;
                     self.next_poll = now;
                 }
-                SignalEvent::Changed => {
+                NotificationEvent::Changed => {
                     self.pull_pending = true;
                     if self.state != "offline" && self.state != "credentials" {
                         self.next_poll = now;
                     }
                 }
-                SignalEvent::Disconnected => {
-                    if self.signal_connected {
+                NotificationEvent::Disconnected => {
+                    if self.notification_connected {
                         self.next_fallback = now + self.fallback_interval();
                     }
-                    self.signal_connected = false;
+                    self.notification_connected = false;
                 }
             }
         }
@@ -432,11 +317,7 @@ impl App {
         if let Some(cancel) = self.watcher_cancel.take() {
             cancel.cancel();
         }
-        self.pending = None;
-        if let Ok(mut latest) = self.latest.lock() {
-            *latest = None;
-        }
-        if let Ok(mut latest) = self.v1_latest.lock() {
+        if let Ok(mut latest) = self.clipboard_latest.lock() {
             *latest = None;
         }
     }
@@ -466,76 +347,11 @@ impl App {
         }
         let allow_sensitive = self.config.sync.allow_sensitive;
         let tx = self.sender.clone();
-        let latest = self.latest.clone();
-        let v1_latest = Arc::clone(&self.v1_latest);
+        let clipboard_latest = Arc::clone(&self.clipboard_latest);
         let serial = Arc::clone(&self.clipboard_serial);
         let active = Arc::clone(&self.active_watcher);
         let changed_active = Arc::clone(&active);
-        let use_v1 = self.v1.is_some();
         thread::spawn(move || {
-            if use_v1 {
-                if let Ok(watcher) = wayland::create_watcher() {
-                    if tx
-                        .send(Message::WatcherReady(
-                            generation,
-                            WatchCancel::Native(watcher.cancel_handle()),
-                        ))
-                        .is_err()
-                    {
-                        return;
-                    }
-                    let result = wayland::watch_loop_v1(
-                        watcher,
-                        allow_sensitive,
-                        || {
-                            if let Ok(active) = changed_active.lock() {
-                                if *active == generation {
-                                    serial.fetch_add(1, Ordering::SeqCst);
-                                }
-                            }
-                        },
-                        |item| match item {
-                            Ok(change) => {
-                                if let Ok(active) = active.lock() {
-                                    if *active == generation {
-                                        if let Ok(mut value) = v1_latest.lock() {
-                                            *value = Some((
-                                                generation,
-                                                serial.load(Ordering::SeqCst),
-                                                change,
-                                            ));
-                                        }
-                                        let _ = tx.try_send(Message::Clipboard);
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                if let Ok(active) = active.lock() {
-                                    if *active == generation {
-                                        if let Ok(mut value) = v1_latest.lock() {
-                                            *value = Some((
-                                                generation,
-                                                serial.load(Ordering::SeqCst),
-                                                wayland::V1ClipboardChange::Cleared,
-                                            ));
-                                        }
-                                        let _ = tx.try_send(Message::ClipboardError(generation));
-                                    }
-                                }
-                            }
-                        },
-                    );
-                    if result.is_err() {
-                        let _ = tx.try_send(Message::ClipboardError(generation));
-                    }
-                } else {
-                    // The old wl-paste fallback cannot reliably identify our
-                    // own V1 selection or every clear; fail closed.
-                    let _ = tx.try_send(Message::ClipboardError(generation));
-                }
-                let _ = tx.send(Message::WatcherEnded(generation));
-                return;
-            }
             if let Ok(watcher) = wayland::create_watcher() {
                 if tx
                     .send(Message::WatcherReady(
@@ -546,21 +362,53 @@ impl App {
                 {
                     return;
                 }
-                let result = wayland::watch_loop(watcher, allow_sensitive, |item| match item {
-                    Ok(text) => {
-                        if let Ok(mut value) = latest.lock() {
-                            *value = Some((generation, text));
+                let result = wayland::watch_loop(
+                    watcher,
+                    allow_sensitive,
+                    || {
+                        if let Ok(active) = changed_active.lock() {
+                            if *active == generation {
+                                serial.fetch_add(1, Ordering::SeqCst);
+                            }
                         }
-                        let _ = tx.try_send(Message::Clipboard);
-                    }
-                    Err(_) => {
-                        let _ = tx.try_send(Message::ClipboardError(generation));
-                    }
-                });
+                    },
+                    |item| match item {
+                        Ok(change) => {
+                            if let Ok(active) = active.lock() {
+                                if *active == generation {
+                                    if let Ok(mut value) = clipboard_latest.lock() {
+                                        *value = Some((
+                                            generation,
+                                            serial.load(Ordering::SeqCst),
+                                            change,
+                                        ));
+                                    }
+                                    let _ = tx.try_send(Message::Clipboard);
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            if let Ok(active) = active.lock() {
+                                if *active == generation {
+                                    if let Ok(mut value) = clipboard_latest.lock() {
+                                        *value = Some((
+                                            generation,
+                                            serial.load(Ordering::SeqCst),
+                                            wayland::ClipboardChange::Cleared,
+                                        ));
+                                    }
+                                    let _ = tx.try_send(Message::ClipboardError(generation));
+                                }
+                            }
+                        }
+                    },
+                );
                 if result.is_err() {
                     let _ = tx.try_send(Message::ClipboardError(generation));
                 }
-            } else if fallback_watch(generation, allow_sensitive, &tx, &latest).is_err() {
+            } else {
+                // The old wl-paste fallback cannot reliably identify our
+                // own selection or every clear; fail closed.
                 let _ = tx.try_send(Message::ClipboardError(generation));
             }
             let _ = tx.send(Message::WatcherEnded(generation));
@@ -571,17 +419,12 @@ impl App {
             "off"
         } else if !self.config.sync.direction.can_receive() {
             "push"
-        } else if self.signal_connected {
-            "signalr"
+        } else if self.notification_connected {
+            "realtime"
         } else {
             "polling"
         };
-        let transport = if self.v1.is_some() && transport == "signalr" {
-            "v1"
-        } else {
-            transport
-        };
-        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"deviceId":self.v1.as_ref().map(|s| &s.persisted.state.device_id),"inbox":inbox::metadata(self.v1.as_ref().and_then(|s| s.persisted.inbox.as_ref())),"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error) || self.v1.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
+        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"deviceId":self.session.as_ref().map(|s| &s.persisted.state.device_id),"inbox":inbox::metadata(self.session.as_ref().and_then(|s| s.persisted.inbox.as_ref())),"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
     }
     fn stamp_sync(&mut self) {
         self.last_sync = Some(
@@ -597,10 +440,6 @@ impl App {
             .session
             .as_ref()
             .is_some_and(|session| session.history_error)
-            || self
-                .v1
-                .as_ref()
-                .is_some_and(|session| session.history_error)
         {
             self.log(Event::HistoryError);
         }
@@ -618,34 +457,6 @@ impl App {
             _ => {}
         }
     }
-    fn failure(&mut self, err: SyncError) {
-        let remote_error = matches!(&err, SyncError::Remote(_));
-        self.state = match err {
-            SyncError::Remote(Error::Status(401 | 403)) => {
-                self.log(Event::AuthFailed);
-                "credentials"
-            }
-            SyncError::Clipboard(_) => {
-                self.log(Event::ClipboardError);
-                "clipboard_error"
-            }
-            _ => {
-                self.log(Event::Offline);
-                "offline"
-            }
-        };
-        self.needs_check = true;
-        self.next_poll = Instant::now() + Duration::from_secs(self.backoff);
-        // In fallback mode, repeated HTTP failures must not turn the slow
-        // polling cadence back into a fast retry loop. A pending local upload
-        // still uses backoff and a restored SignalR connection wakes us early.
-        if remote_error && !self.signal_connected && self.pending.is_none() {
-            self.next_poll = self
-                .next_poll
-                .max(Instant::now() + self.fallback_interval());
-        }
-        self.backoff = (self.backoff * 2).min(30);
-    }
     fn tick(&mut self, out: &mut impl Write) {
         let now = Instant::now();
         if now >= self.next_config_check {
@@ -654,147 +465,41 @@ impl App {
                 self.reload();
             }
         }
-        self.signal_events(now);
+        self.notification_events(now);
         self.ensure_watcher(now);
-        if self.v1.is_some() {
-            self.tick_v1(out, now);
-            return;
+        if self.session.is_some() {
+            self.tick_sync(out, now);
         }
-        if let Ok(mut latest) = self.latest.lock() {
-            if let Some((generation, text)) = latest.take() {
-                if generation == self.watcher_generation && self.wants_watcher() {
-                    if self.config.sync.direction.can_push() {
-                        self.pending = Some(text);
-                        if self.state != "offline" && self.state != "credentials" {
-                            self.next_poll = now;
-                        }
-                    } else if let Some(session) = self.session.as_mut() {
-                        session.engine.clear_clipboard_suppression();
-                    }
-                }
-            }
-        }
-        if !self.config.sync.enabled || self.session.is_none() || now < self.next_poll {
-            return;
-        }
-        // Start the long connection only after the host's initial handshake delay.
-        if let Some(options) = self.signal_options.take() {
-            self.signal_worker = Some(signalr::Worker::start(
-                options.url,
-                options.user,
-                options.password,
-                options.insecure,
-                self.signal_generation,
-                self.signal_tx.clone(),
-            ));
-        }
-        let fallback_due = self.config.sync.direction.can_receive()
-            && !self.signal_connected
-            && now >= self.next_fallback;
-        let signal_pull_due = self.config.sync.direction.can_receive()
-            && self.pull_pending
-            && now >= self.next_signal_pull;
-        if !self.needs_check && self.pending.is_none() && !signal_pull_due && !fallback_due {
-            return;
-        }
-        if self.watcher_cancel.is_none() && !self.needs_check {
-            self.state = "clipboard_error";
-            self.next_poll = Instant::now() + Duration::from_secs(1);
-            return;
-        }
-        let _ = protocol::event(out, "activity", &json!({"active":true}));
-        if self.needs_check {
-            let check = self.session.as_ref().unwrap().remote.check();
-            match check {
-                Ok(()) => self.needs_check = false,
-                Err(err) => {
-                    self.failure(SyncError::Remote(err));
-                    let _ = protocol::event(out, "activity", &json!({"active":false}));
-                    return;
-                }
-            }
-        }
-        // Never write the remote selection without an active listener: its
-        // corresponding clipboard event could otherwise arrive only after a
-        // later user copy, leaving a stale loop-suppression marker behind.
-        if self.watcher_cancel.is_none() {
-            self.state = "clipboard_error";
-            self.next_poll = Instant::now() + Duration::from_secs(1);
-            let _ = protocol::event(out, "activity", &json!({"active":false}));
-            return;
-        }
-        if let Some(text) = self.pending.take() {
-            let result = self.session.as_mut().unwrap().local_changed(&text);
-            match result {
-                Ok(outcome) => {
-                    self.note_outcome(&outcome);
-                    emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
-                }
-                Err(err) => {
-                    self.pending = Some(text);
-                    self.failure(err);
-                    let _ = protocol::event(out, "activity", &json!({"active":false}));
-                    return;
-                }
-            }
-        }
-        if signal_pull_due || fallback_due {
-            let result = self.session.as_mut().unwrap().pull(false, now);
-            match result {
-                Ok(outcome) => {
-                    self.note_outcome(&outcome);
-                    emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
-                    self.log(Event::Polled);
-                    self.pull_pending = false;
-                    self.next_fallback = Instant::now() + self.fallback_interval();
-                    // Coalesce bursts while preserving the last notification.
-                    self.next_signal_pull = Instant::now() + Duration::from_millis(500);
-                }
-                Err(err) => {
-                    self.failure(err);
-                    let _ = protocol::event(out, "activity", &json!({"active":false}));
-                    return;
-                }
-            }
-        }
-        if self.state != "connected" {
-            self.log(Event::Connected);
-        }
-        self.state = "connected";
-        self.backoff = 1;
-        self.next_poll = Instant::now();
-        let _ = protocol::event(out, "activity", &json!({"active":false}));
     }
-
-    fn v1_failure(&mut self, error: V1Error) {
+    fn sync_failure(&mut self, error: SyncError) {
         self.state = match error {
-            V1Error::Remote(Error::Status(401 | 403)) | V1Error::Credentials => "credentials",
-            V1Error::Remote(Error::Status(409)) | V1Error::Conflict => {
-                self.v1_conflict = true;
+            SyncError::Remote(Error::Status(401 | 403)) | SyncError::Credentials => "credentials",
+            SyncError::Remote(Error::Status(409)) | SyncError::Conflict => {
+                self.conflict = true;
                 "conflict"
             }
-            V1Error::Expired => {
-                self.v1_conflict = true;
+            SyncError::Expired => {
+                self.conflict = true;
                 "expired"
             }
-            V1Error::Epoch => {
-                self.v1_conflict = true;
+            SyncError::Epoch => {
+                self.conflict = true;
                 "re_pair"
             }
-            V1Error::Storage(_) => {
-                self.v1_conflict = true;
+            SyncError::Storage(_) => {
+                self.conflict = true;
                 "storage_error"
             }
-            V1Error::Clipboard(_) => "clipboard_error",
+            SyncError::Clipboard(_) => "clipboard_error",
             _ => "offline",
         };
         self.next_poll = Instant::now() + Duration::from_secs(self.backoff);
         self.backoff = (self.backoff * 2).min(30);
     }
 
-    fn tick_v1(&mut self, out: &mut impl Write, now: Instant) {
+    fn tick_sync(&mut self, out: &mut impl Write, now: Instant) {
         let change = self
-            .v1_latest
+            .clipboard_latest
             .lock()
             .ok()
             .and_then(|mut latest| latest.take());
@@ -805,17 +510,19 @@ impl App {
                     return;
                 }
                 let result = match change {
-                    wayland::V1ClipboardChange::Text {
+                    wayland::ClipboardChange::Text {
                         text,
                         origin,
                         sensitive,
-                    } => self.v1.as_mut().unwrap().record_local(
+                    } => self.session.as_mut().unwrap().record_local(
                         &text,
                         origin.as_deref(),
                         sensitive,
                         now,
                     ),
-                    wayland::V1ClipboardChange::Cleared => self.v1.as_mut().unwrap().record_clear(),
+                    wayland::ClipboardChange::Cleared => {
+                        self.session.as_mut().unwrap().record_clear()
+                    }
                 };
                 match result {
                     Ok(outcome) => {
@@ -825,7 +532,7 @@ impl App {
                         }
                     }
                     Err(error) => {
-                        self.v1_failure(error);
+                        self.sync_failure(error);
                         return;
                     }
                 }
@@ -834,7 +541,7 @@ impl App {
         if !self.config.sync.enabled
             || self.session.is_none()
             || now < self.next_poll
-            || self.v1_conflict
+            || self.conflict
         {
             return;
         }
@@ -847,29 +554,36 @@ impl App {
             return;
         }
         if self.needs_check {
-            if let Err(error) = self.v1.as_mut().unwrap().check() {
-                self.v1_failure(error);
+            if let Err(error) = self.session.as_mut().unwrap().check() {
+                self.sync_failure(error);
                 return;
             }
             self.needs_check = false;
             self.pull_pending = true;
             if self.config.sync.direction.can_receive() {
-                let session = self.v1.as_ref().unwrap();
-                self.v1_worker = Some(v1_worker::Worker::start(
+                let session = self.session.as_ref().unwrap();
+                self.worker = Some(worker::Worker::start(
                     Arc::clone(&session.remote),
                     session.persisted.notification_identity(),
-                    self.signal_generation,
-                    self.signal_tx.clone(),
+                    self.notification_generation,
+                    self.notification_tx.clone(),
                 ));
             }
             self.state = "connected";
         }
-        let pending = self.v1.as_ref().unwrap().has_pending();
+        let pending = self.session.as_ref().unwrap().has_pending();
         let may_flush = self.config.sync.direction.can_push()
-            || self.v1.as_ref().unwrap().persisted.state.pending.is_none();
+            || self
+                .session
+                .as_ref()
+                .unwrap()
+                .persisted
+                .state
+                .pending
+                .is_none();
         let receive_due = self.config.sync.direction.can_receive()
-            && ((self.pull_pending && now >= self.next_signal_pull)
-                || (!self.signal_connected && now >= self.next_fallback));
+            && ((self.pull_pending && now >= self.next_notification_pull)
+                || (!self.notification_connected && now >= self.next_fallback));
         if !(receive_due || pending && may_flush) {
             return;
         }
@@ -880,13 +594,13 @@ impl App {
                 return;
             }
             let observed = self.clipboard_serial.load(Ordering::SeqCst);
-            match self.v1.as_mut().unwrap().flush(observed) {
+            match self.session.as_mut().unwrap().flush(observed) {
                 Ok(outcome) => {
                     self.note_outcome(&outcome);
                     emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
                 }
                 Err(error) => {
-                    self.v1_failure(error);
+                    self.sync_failure(error);
                     let _ = protocol::event(out, "activity", &json!({"active":false}));
                     return;
                 }
@@ -898,22 +612,22 @@ impl App {
                 return;
             }
             let observed = self.clipboard_serial.load(Ordering::SeqCst);
-            match self.v1.as_mut().unwrap().pull(observed, now) {
+            match self.session.as_mut().unwrap().pull(observed, now) {
                 Ok(outcome) => {
                     self.note_outcome(&outcome);
                     emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
                     self.pull_pending = false;
                     self.next_fallback = Instant::now() + self.fallback_interval();
-                    self.next_signal_pull = Instant::now() + Duration::from_millis(500);
+                    self.next_notification_pull = Instant::now() + Duration::from_millis(500);
                 }
                 Err(error) => {
-                    self.v1_failure(error);
+                    self.sync_failure(error);
                     let _ = protocol::event(out, "activity", &json!({"active":false}));
                     return;
                 }
             }
         }
-        if let (Some(worker), Some(session)) = (&self.v1_worker, &self.v1) {
+        if let (Some(worker), Some(session)) = (&self.worker, &self.session) {
             worker.update(&session.persisted);
         }
         self.state = "connected";
@@ -966,14 +680,14 @@ impl App {
                     _ => Err("invalid_filter"),
                 }
             }
-            "re_pair" if self.v1.is_some() => {
+            "re_pair" if self.session.is_some() => {
                 if request.params.get("confirm").and_then(Value::as_bool) != Some(true) {
                     Err("confirmation_required")
                 } else {
-                    self.stop_signalr();
-                    match self.v1.as_mut().unwrap().re_pair() {
+                    self.stop_notifications();
+                    match self.session.as_mut().unwrap().re_pair() {
                         Ok(()) => {
-                            self.v1_conflict = false;
+                            self.conflict = false;
                             self.needs_check = true;
                             self.pull_pending = true;
                             self.state = "connecting";
@@ -981,7 +695,7 @@ impl App {
                             Ok(self.status())
                         }
                         Err(error) => {
-                            self.v1_failure(error);
+                            self.sync_failure(error);
                             Err("sync_failed")
                         }
                     }
@@ -1050,57 +764,39 @@ impl App {
                     Err(_) => Err("invalid_config"),
                 }
             }
-            "push" if self.v1.is_some() => {
+            "push" if self.session.is_some() => {
                 if self.watcher_cancel.is_none()
                     || self.clipboard_serial.load(Ordering::SeqCst)
                         != self.processed_clipboard_serial
                 {
                     Err("clipboard_unavailable")
                 } else {
-                    if let Ok(mut latest) = self.v1_latest.lock() {
+                    if let Ok(mut latest) = self.clipboard_latest.lock() {
                         *latest = None;
                     }
                     let observed = self.clipboard_serial.load(Ordering::SeqCst);
-                    match self.v1.as_mut().unwrap().push_now(observed) {
+                    match self.session.as_mut().unwrap().push_now(observed) {
                         Ok(outcome) => {
-                            self.v1_conflict = false;
+                            self.conflict = false;
                             self.state = "connected";
                             self.next_poll = Instant::now();
-                            if let (Some(worker), Some(session)) = (&self.v1_worker, &self.v1) {
+                            if let (Some(worker), Some(session)) = (&self.worker, &self.session) {
                                 worker.update(&session.persisted);
                             }
                             self.note_outcome(&outcome);
                             Ok(json!({"outcome":outcome_name(&outcome)}))
                         }
-                        Err(V1Error::Clipboard(v1_session::ClipboardError::Sensitive)) => {
+                        Err(SyncError::Clipboard(session::ClipboardError::Sensitive)) => {
                             Err("sensitive_blocked")
                         }
                         Err(error) => {
-                            self.v1_failure(error);
+                            self.sync_failure(error);
                             Err("sync_failed")
                         }
                     }
                 }
             }
-            "push" => match self
-                .session
-                .as_mut()
-                .map(|s| s.push_now(self.config.sync.allow_sensitive))
-            {
-                Some(Ok(outcome)) => {
-                    self.note_outcome(&outcome);
-                    Ok(json!({"outcome":outcome_name(&outcome)}))
-                }
-                Some(Err(SyncError::Clipboard(wayland::ClipboardError::Sensitive))) => {
-                    Err("sensitive_blocked")
-                }
-                Some(Err(err)) => {
-                    self.failure(err);
-                    Err("sync_failed")
-                }
-                None => Err("not_configured"),
-            },
-            "pull" if self.v1.is_some() => {
+            "pull" if self.session.is_some() => {
                 if request.params.get("force").and_then(Value::as_bool) == Some(true) {
                     Err("force_not_supported")
                 } else if self.watcher_cancel.is_none()
@@ -1108,58 +804,36 @@ impl App {
                         != self.processed_clipboard_serial
                 {
                     Err("clipboard_unavailable")
-                } else if self.v1_conflict {
+                } else if self.conflict {
                     Err("sync_failed")
                 } else {
                     let observed = self.clipboard_serial.load(Ordering::SeqCst);
-                    match self.v1.as_mut().unwrap().pull(observed, Instant::now()) {
+                    match self
+                        .session
+                        .as_mut()
+                        .unwrap()
+                        .pull(observed, Instant::now())
+                    {
                         Ok(outcome) => {
-                            if let (Some(worker), Some(session)) = (&self.v1_worker, &self.v1) {
+                            if let (Some(worker), Some(session)) = (&self.worker, &self.session) {
                                 worker.update(&session.persisted);
                             }
                             self.note_outcome(&outcome);
                             Ok(json!({"outcome":outcome_name(&outcome)}))
                         }
                         Err(error) => {
-                            self.v1_failure(error);
+                            self.sync_failure(error);
                             Err("sync_failed")
                         }
                     }
                 }
             }
-            "pull" if self.config.sync.enabled && self.watcher_cancel.is_none() => {
-                Err("clipboard_unavailable")
-            }
-            "pull" => {
-                let force = request
-                    .params
-                    .get("force")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let enabled = self.config.sync.enabled;
-                if let Some(session) = self.session.as_mut() {
-                    session.engine.set_enabled(true);
-                }
-                let result = self.session.as_mut().map(|s| s.pull(force, Instant::now()));
-                if let Some(session) = self.session.as_mut() {
-                    session.engine.set_enabled(enabled);
-                    if !enabled || self.watcher_cancel.is_none() {
-                        session.engine.clear_clipboard_suppression();
-                    }
-                }
-                match result {
-                    Some(Ok(outcome)) => {
-                        self.note_outcome(&outcome);
-                        Ok(json!({"outcome":outcome_name(&outcome)}))
-                    }
-                    Some(Err(err)) => {
-                        self.failure(err);
-                        Err("sync_failed")
-                    }
-                    None => Err("not_configured"),
-                }
-            }
-            "read_inbox" => match self.v1.as_ref().and_then(|s| s.persisted.inbox.as_ref()) {
+            "push" | "pull" => Err("not_configured"),
+            "read_inbox" => match self
+                .session
+                .as_ref()
+                .and_then(|s| s.persisted.inbox.as_ref())
+            {
                 Some(item) => {
                     match (
                         request.params.get("id").and_then(Value::as_str),
@@ -1172,13 +846,13 @@ impl App {
                 None => Err("inbox_stale"),
             },
             "copy_inbox" => match request.params.get("id").and_then(Value::as_str) {
-                Some(id) => match self.v1.as_mut() {
+                Some(id) => match self.session.as_mut() {
                     Some(session) => match session.copy_inbox(id) {
                         Ok(true) => Ok(json!({})),
                         Ok(false) => Err("inbox_stale"),
-                        Err(V1Error::Clipboard(_)) => Err("clipboard_unavailable"),
+                        Err(SyncError::Clipboard(_)) => Err("clipboard_unavailable"),
                         Err(error) => {
-                            self.v1_failure(error);
+                            self.sync_failure(error);
                             Err("inbox_failed")
                         }
                     },
@@ -1187,11 +861,11 @@ impl App {
                 None => Err("invalid_request"),
             },
             "clear_inbox" => match request.params.get("id").and_then(Value::as_str) {
-                Some(id) => match self.v1.as_mut().map(|s| s.clear_inbox(id)) {
+                Some(id) => match self.session.as_mut().map(|s| s.clear_inbox(id)) {
                     Some(Ok(true)) => Ok(json!({"cleared": true})),
                     Some(Ok(false)) | None => Err("inbox_stale"),
                     Some(Err(error)) => {
-                        self.v1_failure(error);
+                        self.sync_failure(error);
                         Err("inbox_failed")
                     }
                 },
@@ -1295,150 +969,6 @@ fn history_text(entries: Vec<Entry>, digest: &str) -> Option<String> {
         .find(|entry| entry.hash.eq_ignore_ascii_case(digest))
         .map(|entry| entry.text)
 }
-// wl-paste executes one helper per selection and waits for it to finish. Frames
-// are therefore serialized; a u32::MAX frame denotes an empty/sensitive offer.
-fn watch_event(allow_sensitive: bool) {
-    let state = env::var("CLIPBOARD_STATE").unwrap_or_default();
-    let mut output = io::stdout().lock();
-    if state != "data" && !(state == "sensitive" && allow_sensitive) {
-        let _ = output.write_all(&u32::MAX.to_be_bytes());
-        return;
-    }
-    let input = io::stdin();
-    let text = wayland::read_bounded(
-        input.lock(),
-        omaclipsync_core::MAX_TEXT_BYTES,
-        wayland::READ_TIMEOUT,
-    );
-    match text {
-        Ok(text) => {
-            let _ = output
-                .write_all(&(text.len() as u32).to_be_bytes())
-                .and_then(|_| output.write_all(text.as_bytes()));
-        }
-        Err(_) => {
-            let _ = output.write_all(&u32::MAX.to_be_bytes());
-        }
-    }
-}
-fn fallback_snapshot() -> Option<String> {
-    let mut child = Command::new("wl-paste")
-        .args(["--no-newline", "--type", wayland::MIME])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let stdout = child.stdout.take()?;
-    let text = wayland::read_bounded(
-        stdout,
-        omaclipsync_core::MAX_TEXT_BYTES,
-        wayland::READ_TIMEOUT,
-    )
-    .ok();
-    let deadline = Instant::now() + Duration::from_secs(1);
-    let success = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break false;
-            }
-        }
-    };
-    if success {
-        text.map(|value| omaclipsync_core::hash(&value))
-    } else {
-        None
-    }
-}
-fn fallback_watch(
-    generation: u64,
-    allow_sensitive: bool,
-    tx: &SyncSender<Message>,
-    latest: &Arc<Mutex<Option<(u64, String)>>>,
-) -> io::Result<()> {
-    let initial_hash = fallback_snapshot();
-    let exe = env::current_exe()?;
-    let mut command = Command::new("wl-paste");
-    command
-        .args(["--type", wayland::MIME, "--watch"])
-        .arg(exe)
-        .arg("--watch-event");
-    if allow_sensitive {
-        command.arg("--allow-sensitive");
-    }
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| io::Error::other("missing watcher output"))?;
-    let child = Arc::new(Mutex::new(child));
-    if tx
-        .send(Message::WatcherReady(
-            generation,
-            WatchCancel::Fallback(child.clone()),
-        ))
-        .is_err()
-    {
-        if let Ok(mut child) = child.lock() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        return Ok(());
-    }
-    let mut first = true;
-    let result = loop {
-        let mut header = [0u8; 4];
-        if let Err(error) = stdout.read_exact(&mut header) {
-            break Err(error);
-        }
-        let length = u32::from_be_bytes(header);
-        if length == u32::MAX {
-            first = false;
-            continue;
-        }
-        if length as usize > omaclipsync_core::MAX_TEXT_BYTES {
-            break Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "oversized offer",
-            ));
-        }
-        let mut bytes = vec![0u8; length as usize];
-        if let Err(error) = stdout.read_exact(&mut bytes) {
-            break Err(error);
-        }
-        let text = match String::from_utf8(bytes) {
-            Ok(text) => text,
-            Err(_) => continue,
-        };
-        // If the initial snapshot is unavailable, discard the first data frame
-        // rather than risk overwriting the server with a stale selection.
-        let is_initial = first
-            && initial_hash
-                .as_ref()
-                .is_none_or(|digest| *digest == omaclipsync_core::hash(&text));
-        first = false;
-        if is_initial {
-            continue;
-        }
-        if let Ok(mut value) = latest.lock() {
-            *value = Some((generation, text));
-        }
-        let _ = tx.try_send(Message::Clipboard);
-    };
-    if let Ok(mut child) = child.lock() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    result
-}
 fn outcome_name(outcome: &Outcome) -> &'static str {
     match outcome {
         Outcome::Stored => "stored",
@@ -1469,16 +999,11 @@ fn emit_sync_success(out: &mut impl Write, outcome: &Outcome, enabled: bool) {
     }
 }
 fn main() {
-    if env::args().nth(1).as_deref() == Some("--watch-event") {
-        watch_event(env::args().nth(2).as_deref() == Some("--allow-sensitive"));
-        return;
-    }
     let Some(paths) = Paths::from_env() else {
         eprintln!("missing home directory");
         return;
     };
     let (tx, rx) = mpsc::sync_channel(16);
-    let latest = Arc::new(Mutex::new(None));
     let stdin_tx = tx.clone();
     thread::spawn(move || {
         let stdin = io::stdin();
@@ -1501,7 +1026,7 @@ fn main() {
             }
         }
     });
-    let mut app = App::new(paths, tx, latest, env::args().any(|arg| arg == "--verbose"));
+    let mut app = App::new(paths, tx, env::args().any(|arg| arg == "--verbose"));
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let mut published = Value::Null;
@@ -1579,7 +1104,7 @@ fn main() {
         }
     }
     app.stop_watcher();
-    app.stop_signalr();
+    app.stop_notifications();
     app.log(Event::Shutdown);
 }
 
@@ -1587,6 +1112,39 @@ fn main() {
 mod tests {
     use super::*;
     use omaclipsync_core::{Filter, FilterMode};
+    fn fixture_session(
+        path: &std::path::Path,
+        history: History,
+    ) -> session::Session<session::WaylandClipboard> {
+        use rustclipsync_core::{
+            client::Client,
+            session::{Session as CoreSession, SessionConfig},
+        };
+        session::Session::from_core(
+            CoreSession::open(
+                SessionConfig {
+                    server: "https://example.invalid".into(),
+                    encryption_key: [7; 32],
+                    filter: Filter::new(FilterMode::Off, &[], false).unwrap(),
+                    allow_sensitive: false,
+                },
+                Arc::new(
+                    Client::new(
+                        "https://example.invalid",
+                        "fixture".into(),
+                        String::new(),
+                        false,
+                    )
+                    .unwrap(),
+                ),
+                omaclipsync_core::state::FileStateStore(path.join("state")),
+                session::WaylandClipboard,
+                history,
+                Arc::new(AtomicU64::new(0)),
+            )
+            .unwrap(),
+        )
+    }
 
     #[test]
     fn changing_sensitive_policy_discards_pending_events_and_invalidates_old_watcher() {
@@ -1597,17 +1155,15 @@ mod tests {
             logs: dir.path().join("logs"),
         };
         let (tx, _rx) = mpsc::sync_channel(4);
-        let latest = Arc::new(Mutex::new(None));
-        let mut app = App::new(paths, tx, latest.clone(), false);
+        let mut app = App::new(paths, tx, false);
         app.config.sync.allow_sensitive = true;
-        app.pending = Some("pending fixture".into());
-        *latest.lock().unwrap() = Some((app.watcher_generation, "latest fixture".into()));
+        *app.clipboard_latest.lock().unwrap() =
+            Some((app.watcher_generation, 1, wayland::ClipboardChange::Cleared));
         let old_generation = app.watcher_generation;
         let mut config = app.config.clone();
         config.sync.allow_sensitive = false;
         app.apply(config);
-        assert!(app.pending.is_none());
-        assert!(latest.lock().unwrap().is_none());
+        assert!(app.clipboard_latest.lock().unwrap().is_none());
         assert_ne!(app.watcher_generation, old_generation);
         assert!(!app.config.sync.allow_sensitive);
     }
@@ -1622,7 +1178,7 @@ mod tests {
             logs: dir.path().join("logs"),
         };
         let (tx, _rx) = mpsc::sync_channel(4);
-        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
+        let mut app = App::new(paths, tx, false);
         app.config.sync.enabled = false;
         let request = Request::parse(
             br#"{"id":1,"method":"set_direction","params":{"direction":"receive"}}"#,
@@ -1683,7 +1239,7 @@ mod tests {
             logs: dir.path().join("logs"),
         };
         let (tx, _rx) = mpsc::sync_channel(4);
-        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
+        let mut app = App::new(paths, tx, false);
         let now = Instant::now();
         let retry_at = now + Duration::from_secs(60);
         for state in ["offline", "credentials"] {
@@ -1702,7 +1258,7 @@ mod tests {
         assert_eq!(app.next_poll, now);
     }
     #[test]
-    fn signal_transitions_schedule_catchup_and_bounded_fallback() {
+    fn notification_transitions_schedule_catchup_and_bounded_fallback() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths {
             config: dir.path().join("config.json"),
@@ -1711,53 +1267,50 @@ mod tests {
         };
         let history = History::new(&paths.history, false, 10).unwrap();
         let (tx, _rx) = mpsc::sync_channel(4);
-        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
-        app.session = Some(Session::new(
-            Server::new(
-                "https://example.invalid",
-                "fixture".into(),
-                "fixture".into(),
-            )
-            .unwrap(),
-            WaylandClipboard,
-            Filter::new(FilterMode::Off, &[], false).unwrap(),
-            Duration::from_secs(300),
-            true,
-            32768,
-            history,
-        ));
+        let mut app = App::new(paths, tx, false);
+        app.session = Some(fixture_session(dir.path(), history));
         app.config.sync.interval_sec = 3; // Legacy value, clamped to 30 seconds.
-        app.signal_generation = 7;
+        app.notification_generation = 7;
         app.state = "connected";
         let now = Instant::now();
-        app.signal_tx.send((7, SignalEvent::Connected)).unwrap();
-        app.signal_events(now);
-        assert!(app.signal_connected && app.pull_pending);
+        app.notification_tx
+            .send((7, NotificationEvent::Connected))
+            .unwrap();
+        app.notification_events(now);
+        assert!(app.notification_connected && app.pull_pending);
         assert_eq!(app.next_poll, now);
-        assert_eq!(app.status()["transport"], "signalr");
+        assert_eq!(app.status()["transport"], "realtime");
 
         app.pull_pending = false;
-        app.signal_tx.send((7, SignalEvent::Disconnected)).unwrap();
-        app.signal_events(now);
-        assert!(!app.signal_connected);
+        app.notification_tx
+            .send((7, NotificationEvent::Disconnected))
+            .unwrap();
+        app.notification_events(now);
+        assert!(!app.notification_connected);
         assert_eq!(app.next_fallback, now + Duration::from_secs(30));
         assert_eq!(app.status()["transport"], "polling");
 
         // A late notification from a canceled connection cannot revive it.
-        app.signal_tx.send((6, SignalEvent::Connected)).unwrap();
-        app.signal_events(now);
-        assert!(!app.signal_connected && !app.pull_pending);
+        app.notification_tx
+            .send((6, NotificationEvent::Connected))
+            .unwrap();
+        app.notification_events(now);
+        assert!(!app.notification_connected && !app.pull_pending);
 
         // Real-time events must not defeat network-error backoff.
         app.state = "offline";
         app.next_poll = now + Duration::from_secs(8);
-        app.signal_tx.send((7, SignalEvent::Changed)).unwrap();
-        app.signal_events(now);
+        app.notification_tx
+            .send((7, NotificationEvent::Changed))
+            .unwrap();
+        app.notification_events(now);
         assert!(app.pull_pending);
         assert_eq!(app.next_poll, now + Duration::from_secs(8));
 
-        app.signal_tx.send((7, SignalEvent::Connected)).unwrap();
-        app.signal_events(now);
+        app.notification_tx
+            .send((7, NotificationEvent::Connected))
+            .unwrap();
+        app.notification_events(now);
         assert_eq!(app.next_poll, now); // Reconnect triggers immediate catch-up.
         app.config.sync.enabled = false;
         assert_eq!(app.status()["transport"], "off");
@@ -1808,23 +1361,13 @@ mod tests {
             logs: dir.path().join("logs"),
         };
         let (tx, _rx) = mpsc::sync_channel(4);
-        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
+        let mut app = App::new(paths, tx, false);
         app.config.sync.enabled = true;
-        app.session = Some(Session::new(
-            Server::new(
-                "https://example.invalid",
-                "fixture".into(),
-                "fixture".into(),
-            )
-            .unwrap(),
-            WaylandClipboard,
-            Filter::new(FilterMode::Off, &[], false).unwrap(),
-            Duration::from_secs(300),
-            true,
-            32768,
+        app.session = Some(fixture_session(
+            dir.path(),
             History::new(dir.path().join("history.json"), false, 50).unwrap(),
         ));
-        let req = Request::parse(br#"{"id":1,"method":"pull","params":{"force":true}}"#).unwrap();
+        let req = Request::parse(br#"{"id":1,"method":"pull"}"#).unwrap();
         let (_, result, _) = app.handle(req);
         assert_eq!(result.unwrap_err(), "clipboard_unavailable");
     }
@@ -1848,21 +1391,8 @@ mod tests {
                 .unwrap();
         }
         let (tx, _rx) = mpsc::sync_channel(4);
-        let mut app = App::new(paths, tx, Arc::new(Mutex::new(None)), false);
-        app.session = Some(Session::new(
-            Server::new(
-                "https://example.invalid",
-                "fixture".into(),
-                "fixture".into(),
-            )
-            .unwrap(),
-            WaylandClipboard,
-            Filter::new(FilterMode::Off, &[], false).unwrap(),
-            Duration::from_secs(300),
-            true,
-            32768,
-            history,
-        ));
+        let mut app = App::new(paths, tx, false);
+        app.session = Some(fixture_session(dir.path(), history));
         for i in 0..6 {
             let req = Request::parse(
                 serde_json::to_vec(&json!({"id":1,"method":"set_favorite",

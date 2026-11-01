@@ -4,6 +4,10 @@ English · [简体中文](README-ZH.md)
 
 The shared Rust core for RustClipSync clients, extracted from the Omaclipsync 0.2.0 synchronization implementation. Linux and Windows clients reuse its message state machine and HTTPS protocol with platform-specific adapters. This is a client library, not a server or a standalone desktop application.
 
+## Current API
+
+All network operations use `/api/...`. Clients and the server must be updated together when moving from earlier endpoint paths. Device identity, cursor and encrypted-state formats are unchanged. Rust desktop clients and Omaclipsync consume exported snapshots of this repository; endpoint logic must be changed here and re-exported.
+
 ## Components
 
 | Module | Responsibility |
@@ -17,7 +21,7 @@ The shared Rust core for RustClipSync clients, extracted from the Omaclipsync 0.
 
 The library has no Wayland, WinUI, Windows API, Secret Service, tray or file-path dependencies. Creating a session loads or creates encrypted state but does not connect to the network or read or write the clipboard. Hosts must serialize synchronization calls on a dedicated worker thread; do not perform blocking network operations on the UI thread.
 
-The current library version, `0.2.0`, identifies the shared Rust API independently of server and client product versions. The `/v1/` HTTP paths describe the protocol version.
+The current library version, `0.3.0`, identifies the shared Rust API independently of server and client product versions. The `/api/` prefix identifies the current HTTP API without a protocol-version selector.
 
 ## Adapter responsibilities
 
@@ -35,7 +39,7 @@ Synchronization entry points check restored pending content against the current 
 
 ## Protocol and privacy constraints
 
-- Connects to the [RustClipSync server](https://github.com/Infinifar/rustclipsync-server) using its [protocol](https://github.com/Infinifar/rustclipsync-server/blob/main/PROTOCOL-V1.md). Legacy SyncClipboard HTTP/SignalR transport is not implemented.
+- Connects to the [RustClipSync server](https://github.com/Infinifar/rustclipsync-server) using its [protocol](https://github.com/Infinifar/rustclipsync-server/blob/main/PROTOCOL.md). Legacy SyncClipboard HTTP/SignalR transport is not implemented.
 - A UUID identifies one copy event and remains stable across retries. Revisions determine order; epochs separate server resets. Client time is used only for retry expiry, not ordering or uniqueness.
 - Automatic uploads do not silently overwrite conflicts; offline synchronization keeps only the latest value. When an upload outcome is uncertain, retain the request and resolve or cancel it before processing a newer value.
 - Persistent cursors and acknowledgments prevent replay. A message whose clipboard write outcome is unknown after a crash is recovered as `skipped`; exactly-once clipboard side effects are not guaranteed.
@@ -63,7 +67,7 @@ This requires Python 3 and OpenSSL. It launches a temporary server, database and
 For local development with adjacent repositories:
 
 ```toml
-rustclipsync-core = { version = "=0.2.0", path = "../rustclipsync-core" }
+rustclipsync-core = { version = "=0.3.0", path = "../rustclipsync-core" }
 ```
 
 The [source repository](https://github.com/Infinifar/rustclipsync-core) is public under the MIT license and is not published on crates.io. To keep standalone Omaclipsync checkouts and source packages buildable, Omaclipsync consumes an automatically exported snapshot in `core/vendor/rustclipsync-core`:
@@ -85,4 +89,4 @@ MIT license. The original implementation came from `Infinifar/omaclipsync`, extr
 
 Clients can call `Session::use_sensitive_inbox(true)`. With sensitive synchronization enabled, incoming sensitive text and the receive cursor are stored in one encrypted state commit and acknowledged as `skipped`, without claiming a system clipboard write. Only the latest item is retained; `clear_inbox(id)` does not reset the cursor. Default receive behavior is unchanged. `HistorySink::record_marked` lets platforms exclude sensitive text from ordinary history; notification identity does not contain inbox text.
 
-The new `Persisted.inbox` field defaults to empty when reading older encrypted files. The state limit is now 64 MiB to accommodate worst-case pending, replacement and private inbox items. This Rust API change was released as crate 0.2.0 without changing the server HTTP protocol. Omaclipsync 0.2.1 still uses its own 0.1.0 source snapshot.
+The new `Persisted.inbox` field defaults to empty when reading older encrypted files. The state limit is now 64 MiB to accommodate worst-case pending, replacement and private inbox items. This Rust API change was released as crate 0.2.0 without changing the server HTTP protocol.

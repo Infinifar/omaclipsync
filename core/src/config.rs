@@ -19,20 +19,31 @@ pub struct Config {
     pub dedupe: DedupeConfig,
     pub logging: LoggingConfig,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, Default)]
 pub struct ServerConfig {
     pub url: String,
     pub user: String,
     pub insecure: bool,
-    pub protocol: ServerProtocol,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ServerProtocol {
-    #[default]
-    V1,
-    Legacy,
+impl<'de> Deserialize<'de> for ServerConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Default, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct SavedServer {
+            url: String,
+            user: String,
+            insecure: bool,
+            // Consume the removed selector without retaining or honoring it.
+            #[serde(rename = "protocol")]
+            _removed_selector: Option<serde::de::IgnoredAny>,
+        }
+        let value = SavedServer::deserialize(deserializer)?;
+        Ok(Self {
+            url: value.url,
+            user: value.user,
+            insecure: value.insecure,
+        })
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
@@ -44,10 +55,10 @@ pub struct SyncConfig {
     pub direction: SyncDirection,
     pub allow_sensitive: bool,
     // Saved configurations predating the inbox retain automatic reception.
-    #[serde(default = "legacy_auto_apply_sensitive")]
+    #[serde(default = "saved_auto_apply_sensitive")]
     pub auto_apply_sensitive: bool,
 }
-fn legacy_auto_apply_sensitive() -> bool {
+fn saved_auto_apply_sensitive() -> bool {
     true
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -234,6 +245,22 @@ impl Config {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn removed_protocol_selector_cannot_select_a_transport() {
+        for selector in ["legacy", "v1", "other"] {
+            let config: Config = serde_json::from_value(serde_json::json!({
+                "server": {"url":"https://example.test", "user":"fixture", "protocol": selector}
+            }))
+            .unwrap();
+            assert!(config.validate().is_ok());
+            let saved = serde_json::to_value(&config).unwrap();
+            assert!(saved["server"].get("protocol").is_none());
+        }
+        assert!(serde_json::from_value::<Config>(
+            serde_json::json!({"server":{"unexpected":true}})
+        )
+        .is_err());
+    }
     #[test]
     fn defaults_and_atomic_private_config() {
         let dir = tempfile::tempdir().unwrap();
