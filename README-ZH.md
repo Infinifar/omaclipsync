@@ -66,9 +66,9 @@ gtk-update-icon-cache -ft "$HOME/.local/share/icons/hicolor"
 
 实时通知还会直接提供插件自带的图标。卸载后如果不再需要，可自行删除安装的图标文件。`gtk-update-icon-cache` 由 GTK 提供；安装后桌面会话可能需要重新加载图标主题。
 
-插件运行在未沙箱化的 Omarchy shell 中，具有当前用户权限；请先审阅源码及仓库内的 x86_64 预编译二进制。安装并启用：
+插件运行在未沙箱化的 Omarchy shell 中，具有当前用户权限；请先审阅源码及仓库内的 x86_64 预编译二进制。
 
-也可以从源码打包，由用户自行备份、部署和启用：
+可从源码打包，并自行备份、部署和启用：
 
 ```sh
 ./scripts/package.sh

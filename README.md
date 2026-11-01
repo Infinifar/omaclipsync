@@ -66,9 +66,9 @@ gtk-update-icon-cache -ft "$HOME/.local/share/icons/hicolor"
 
 Live notifications also supply the bundled icon directly. Remove the installed icon file when uninstalling if it is no longer needed. `gtk-update-icon-cache` is provided by GTK; a desktop session may need to reload its icon theme after installation.
 
-Plugins run as unsandboxed code with your user's permissions inside Omarchy shell. Review the source and bundled x86_64 binaries before installing and enabling:
+Plugins run as unsandboxed code with your user's permissions inside Omarchy shell. Review the source and bundled x86_64 binaries before installing and enabling.
 
-Alternatively, build a package from source and back up, deploy, and enable it yourself:
+Build a package from source and back up, deploy, and enable it yourself:
 
 ```sh
 ./scripts/package.sh
