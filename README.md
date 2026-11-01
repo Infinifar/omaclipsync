@@ -1,6 +1,6 @@
 # Omaclipsync
 
-Version **0.2.4** adds the encrypted sensitive inbox. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.4), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
+Version **0.2.4**. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.4), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
 
 Build provenance: release CI rebuilds both native executables in a digest-pinned container and compares them byte for byte before packaging. See [reproduction instructions](REPRODUCIBLE-BUILD.md) and the [native review guide](NATIVE-REVIEW.md). This does not replace marketplace security review.
 
@@ -14,7 +14,7 @@ Omaclipsync is a lightweight text clipboard client plugin for Omarchy Quattro, u
 
 For Android, use the [Fcitx5 Android input method](https://github.com/Infinifar/fcitx5-android-bibi-keyboard) with its built-in RustClipSync synchronization module.
 
-Measurements from the older protocol do not describe the current implementation; desktop resource usage still needs separate measurement.
+Desktop resource usage for the current implementation still needs separate measurement.
 
 <p align="center">
   <img src="preview.png" alt="Omaclipsync 0.2.4 main panel" width="578">
@@ -35,12 +35,12 @@ Screenshots were captured from the real Omarchy plugin in English. Server detail
 ## Features
 
 - **Real-time receive and event-driven push**: local copies use Wayland data-control events. HTTPS long polling signals remote changes, after which the client retrieves the latest value.
-- **Automatic recovery**: when the real-time connection is unavailable, the client falls back to polling every 60 seconds by default, configurable from 30 to 300 seconds. Older values below 30 seconds are treated as 30 seconds. Reconnection uses backoff and checks the latest state immediately after reconnecting.
+- **Automatic recovery**: when the real-time connection is unavailable, the client falls back to polling every 60 seconds by default, configurable from 30 to 300 seconds. Reconnection uses backoff and checks the latest state immediately after reconnecting.
 - **Desktop integration**: bar status and controls for push, receive, and pause, with live English and Chinese translations.
 - **Sync direction**: choose push only, receive only, or two-way automatic sync (the default) in the main panel. Manual push and receive remain available in every mode; pause stops automatic sync.
 - **Optional local history**: off by default; browse, copy, paste, and favorite up to five entries. Favorites stay at the top and survive clearing ordinary history. Enabled history is stored as plaintext; system clipboard history can be used instead.
 - **Sync notifications**: enabled by default and configurable in Settings. Successful pushes and receives show a notification without revealing clipboard text; unchanged and failed operations do not.
-- **Sensitive clipboard policy and inbox**: marked sensitive content is blocked in both directions by default. When allowed, choose an encrypted inbox or automatic clipboard writing. The inbox keeps only its latest item, masks the preview, and offers reveal, receipt time, copy and delete. Ordinary history no longer records marked sensitive text.
+- **Sensitive clipboard policy and inbox**: marked sensitive content is blocked in both directions by default. When allowed, choose an encrypted inbox or automatic clipboard writing. The inbox keeps only its latest item, masks the preview, and offers reveal, receipt time, copy and delete. Ordinary history does not record marked sensitive text.
 - **Filtering and deduplication**: regex blacklist or whitelist and optional filtering on receive. Message IDs and a persistent per-device cursor suppress retries and repeated notifications while allowing distinct copies of identical text.
 
 If notifications do not appear, check Omarchy's Do Not Disturb mode with `omarchy shell notifications isDnd`. On Omarchy 4.5.0 RC, notifications received while it is on are kept in notification history without a pop-up. Turn it off in Omarchy or run `omarchy shell notifications setDnd off` to allow pop-ups again.
@@ -68,25 +68,19 @@ Live notifications also supply the bundled icon directly. Remove the installed i
 
 Plugins run as unsandboxed code with your user's permissions inside Omarchy shell. Review the source and bundled x86_64 binaries before installing and enabling:
 
-If upgrading from the old `omaclipsync` plugin ID, first disable it to prevent two clients from syncing or writing history at the same time:
-
-```sh
-omarchy plugin disable omaclipsync
-```
-
 Alternatively, build a package from source and back up, deploy, and enable it yourself:
 
 ```sh
 ./scripts/package.sh
 ```
 
-The packaging command overwrites outputs of the same version in `dist/`; back up any old packages you want to keep first. Git installation is also available:
+The packaging command overwrites outputs of the same version in `dist/`; back up any packages you want to keep first. Git installation is also available:
 
 ```sh
 omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 ```
 
-### Manually deploying and rolling back the plugin package
+### Manually deploying the plugin package
 
 Run these commands yourself only once the server and other clients are ready. They disable the current plugin, move its directory into a backup under your user data directory, and load the package. The manually installed plugin will not be Git-managed. Configuration, history, and keyring entries are outside the plugin directory and need their own backups. Replace `package` with the absolute path to the verified plugin package:
 
@@ -111,11 +105,9 @@ Run these commands yourself only once the server and other clients are ready. Th
 )
 ```
 
-Keep the printed backup path. If validation or enabling fails, retain the backup and inspect the error; do not move it again blindly. To roll back, disable the plugin, move the current plugin directory to a new backup directory, move the saved `previous` directory back to the original load location, then run `omarchy-shell shell rescanPlugins` and `omarchy plugin enable io.github.infinifar.omaclipsync`. The server must also be rolled back to an image and database backup compatible with the old plugin.
+Keep the printed backup path. If validation or enabling fails, retain the backup and inspect the error; do not move it again blindly.
 
 The plugin ID is `io.github.infinifar.omaclipsync`. The repository includes `bin/syncclipd` and `bin/syncclipctl`. Enabling it runs the bundled daemon; installation does not download a separate binary or start a second Quickshell.
-
-When upgrading, the configuration, history, logs, and keyring entries keep their existing `omaclipsync` locations and identifiers. Update any shortcut that invokes the old IPC target to use `io.github.infinifar.omaclipsync`.
 
 ## Setup and use
 
@@ -128,12 +120,12 @@ When upgrading, the configuration, history, logs, and keyring entries keep their
 
 Enable **Allow sensitive content** in Settings, then choose how to receive it with **Automatically copy sensitive receives**:
 
-- **Off**: keep the latest sensitive text in the encrypted local inbox without changing the system clipboard. This is the default for new configurations. A new sensitive item replaces the previous one; ordinary text does not clear it, and local history can remain disabled.
-- **On**: write new sensitive text directly to the system clipboard with its sensitivity marker, without retaining it in the inbox or ordinary history. Existing saved configurations missing this field preserve automatic writing; turn it off to use the inbox. Switching modes does not apply or delete an existing inbox item, reset device identity or move the receive cursor backwards.
+- **Off**: keep the latest sensitive text in the encrypted local inbox without changing the system clipboard. This is the default. A new sensitive item replaces the previous one; ordinary text does not clear it, and local history can remain disabled.
+- **On**: write new sensitive text directly to the system clipboard with its sensitivity marker, without retaining it in the inbox or ordinary history. Switching modes does not apply or delete an existing inbox item, reset device identity or move the receive cursor backwards.
 
 The inbox appears below sync direction on the main panel, with History and Settings still in the last row. Text is masked until you click **Show**. Closing the panel, entering another view, losing the background connection or receiving a replacement hides it again. The preview retains at most the first 64 KiB and shows up to four lines; **Copy to clipboard** copies the complete original through Rust with its sensitive marker and suppresses automatic re-upload. Receipt time follows the active locale and local time zone.
 
-**Delete** removes only the current local inbox item. It does not delete server content or clear a copy already placed on the system clipboard, and the consumed item is not received again. Read, copy and delete validate the message ID, rejecting stale commands after replacement. Existing history lacks sensitivity metadata, so old sensitive entries cannot be identified or removed automatically.
+**Delete** removes only the current local inbox item. It does not delete server content or clear a copy already placed on the system clipboard, and the consumed item is not received again. Read, copy and delete validate the message ID, rejecting stale commands after replacement.
 
 Open the main panel or history from the bar, or run these commands; the plugin does not automatically change keybindings. In the history panel, select **Back** to return to the main panel:
 
@@ -206,20 +198,18 @@ The inbox body and receive cursor are committed together in the existing AES-GCM
 
 The corresponding `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_STATE_HOME` override these paths. Disabling history stops reading and writing it but does not delete existing data. Favorites do not count toward the ordinary entry limit; the 16 MiB file limit still applies to all entries.
 
-## Uninstall and rollback
+## Uninstall
 
 ```sh
 omarchy plugin disable io.github.infinifar.omaclipsync
 omarchy plugin remove io.github.infinifar.omaclipsync
 ```
 
-Uninstalling the plugin does not automatically delete configuration, history, logs, or keyring entries; remove those separately if desired. Some Omarchy versions move a manually copied plugin directory to a hidden backup; check the command output. Before re-enabling the old `omaclipsync` plugin, first disable the new plugin to avoid running both clients. Before rolling back to v0.1.1, back up the history file and remove all favorites: that version cannot read history containing favorite fields.
-
-When rolling back, back up the configuration and remove fields unsupported by the older daemon (such as `sync.autoApplySensitive`, `sync.allowSensitive`, `sync.direction`, or `sync.notifyOnSuccess`) before starting it; older builds reject unknown configuration fields. Back up encrypted state too: a build without inbox support may discard the inbox item when it saves state.
+Uninstalling the plugin does not automatically delete configuration, history, logs, or keyring entries; remove those separately if desired. Some Omarchy versions move a manually copied plugin directory to a hidden backup; check the command output.
 
 ## Build from source
 
-The RustClipSync engine is maintained in the sibling `rustclipsync-core` project. This checkout contains an automatically exported source snapshot in `core/vendor/rustclipsync-core`, with file hashes in `UPSTREAM.json`, so standalone builds do not require a sibling checkout. To update it from the shared project, run `bash scripts/sync-core.sh`; use `--check` to verify an exact match. Do not edit the generated copy. State filenames, Secret Service accounts and the encrypted state format are preserved.
+The RustClipSync engine is maintained in the sibling `rustclipsync-core` project. This checkout contains an automatically exported source snapshot in `core/vendor/rustclipsync-core`, with file hashes in `UPSTREAM.json`, so standalone builds do not require a sibling checkout. To update it from the shared project, run `bash scripts/sync-core.sh`; use `--check` to verify an exact match. Do not edit the generated copy.
 
 Requires Rust, Cargo, Clippy, `jq`, and GNU `tar`; integration tests also require Python 3 and OpenSSL. From the repository root:
 

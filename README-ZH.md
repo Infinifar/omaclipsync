@@ -1,6 +1,6 @@
 # Omaclipsync
 
-**0.2.4** 新增加密敏感收件区，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.4)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
+当前版本 **0.2.4**，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.4)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
 
 构建来源：发布 CI 在摘要固定的容器中从源码重建两个可执行文件，逐字节比较通过后才打包。参见[复现构建说明](REPRODUCIBLE-BUILD.md)及[原生代码审核索引](NATIVE-REVIEW.md)。这不等于市场安全审核通过。
 
@@ -14,7 +14,7 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 
 手机端可使用内置 RustClipSync 同步模块的 [Fcitx5 Android 输入法](https://github.com/Infinifar/fcitx5-android-bibi-keyboard)，配合该服务端与桌面插件同步。
 
-旧协议版本的历史性能数据不适用于当前实现；实际桌面资源占用尚需单独测量。
+当前实现的实际桌面资源占用尚需单独测量。
 
 <p align="center">
   <img src="preview.png" alt="Omaclipsync 0.2.4 主面板" width="578">
@@ -35,12 +35,12 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 ## 特点
 
 - **实时接收，事件驱动推送**：本机复制由 Wayland data-control 事件触发；远端变化通过 HTTPS 长轮询通知，随后读取最新内容。
-- **自动恢复**：实时连接中断后回退到低频轮询；默认 60 秒，可设置 30–300 秒。旧配置低于 30 秒时按 30 秒执行。后台按退避策略重连，恢复后立即检查最新内容。
+- **自动恢复**：实时连接中断后回退到低频轮询；默认 60 秒，可设置 30–300 秒。后台按退避策略重连，恢复后立即检查最新内容。
 - **融入桌面**：顶栏显示连接状态，面板提供推送、接收和暂停；支持中文和英文随系统语言切换。
 - **同步方向**：主面板可选单向推送、单向接收或双向自动同步（默认）。任何模式下都可手动推送和接收；暂停会停止自动同步。
 - **可选的本地历史**：默认关闭，可浏览、复制、粘贴和收藏最多 5 条；收藏置顶，清空普通历史时保留。启用后内容以明文保存在本机，也可以使用系统剪贴板历史代替。
 - **同步通知**：默认开启，可在设置中关闭。成功推送或接收新文本时显示通知，不包含剪贴板正文；内容未变化或同步失败时不提示成功。
-- **敏感内容策略与收件区**：默认不推送或接收应用标记的敏感内容。开启后可选择仅存入加密收件区，或自动写入系统剪贴板；收件区只保留最新一条，默认遮罩，提供显示、收到时间、复制和删除。普通历史不再新增敏感正文。
+- **敏感内容策略与收件区**：默认不推送或接收应用标记的敏感内容。开启后可选择仅存入加密收件区，或自动写入系统剪贴板；收件区只保留最新一条，默认遮罩，提供显示、收到时间、复制和删除。普通历史不保存标记为敏感的正文。
 - **过滤与去重**：支持正则黑名单、白名单和可选的接收过滤；按消息 ID 与每台设备的持久游标避免重试和通知造成重复写入。相同文本的不同复制事件仍可同步。
 
 如果通知没有弹出，可以运行 `omarchy shell notifications isDnd` 检查 Omarchy 的勿扰模式。在 Omarchy 4.5.0 RC 中，开启勿扰时通知会保留在通知历史中，但不会弹窗。可在 Omarchy 中关闭勿扰，或运行 `omarchy shell notifications setDnd off` 恢复弹窗。
@@ -68,25 +68,19 @@ gtk-update-icon-cache -ft "$HOME/.local/share/icons/hicolor"
 
 插件运行在未沙箱化的 Omarchy shell 中，具有当前用户权限；请先审阅源码及仓库内的 x86_64 预编译二进制。安装并启用：
 
-如果从旧 ID `omaclipsync` 升级，请先禁用旧插件，避免两个客户端同时同步或写入历史：
-
-```sh
-omarchy plugin disable omaclipsync
-```
-
 也可以从源码打包，由用户自行备份、部署和启用：
 
 ```sh
 ./scripts/package.sh
 ```
 
-打包命令会覆盖 `dist/` 内同版本的输出；请先备份需要保留的旧包。也可使用 Git 安装：
+打包命令会覆盖 `dist/` 内同版本的输出；请先备份需要保留的安装包。也可使用 Git 安装：
 
 ```sh
 omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 ```
 
-### 手动部署与回退插件安装包
+### 手动部署插件安装包
 
 仅在 服务端和其他客户端已准备好后执行。下面的命令由用户执行，会停止当前插件，将其目录移到用户数据目录中的备份位置，再加载新包；手动部署后的插件不再是 Git 管理的安装。配置、历史和密钥环位于插件目录之外，需按自己的备份策略另行保护。把 `PACKAGE` 改为已验证的插件安装包绝对路径：
 
@@ -100,7 +94,7 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
   test -f "$package" && test -d "$load_root/$plugin_id"
   mkdir -p "$backup_root"
   backup=$(mktemp -d "$backup_root/$plugin_id.XXXXXXXX")
-  printf '旧插件将备份到：%s/previous\n' "$backup"
+  printf '当前插件将备份到：%s/previous\n' "$backup"
   omarchy plugin disable "$plugin_id"
   mv "$load_root/$plugin_id" "$backup/previous"
   mkdir -p "$load_root/$plugin_id"
@@ -111,11 +105,9 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 )
 ```
 
-请记下输出的备份路径。如果验证或启用失败，保留该备份并检查错误；不要重复移动备份。回退时先禁用插件，将当前插件目录移到一个新的备份目录，然后把记下的 `previous` 目录移回原加载位置，重新运行 `omarchy-shell shell rescanPlugins` 和 `omarchy plugin enable io.github.infinifar.omaclipsync`。服务端也必须回退为与旧插件兼容的镜像及数据库备份。
+请记下输出的备份路径。如果验证或启用失败，保留该备份并检查错误；不要重复移动备份。
 
 插件 ID 为 `io.github.infinifar.omaclipsync`。安装源包含 `bin/syncclipd` 和 `bin/syncclipctl`；启用后会运行守护进程，安装时不另行下载二进制或启动第二个 Quickshell。
-
-升级时配置、历史、日志和密钥环项仍使用原有的 `omaclipsync` 位置和标识。若快捷键使用了旧 IPC target，请手动改为 `io.github.infinifar.omaclipsync`。
 
 ## 配置和使用
 
@@ -128,12 +120,12 @@ omarchy plugin add https://github.com/Infinifar/omaclipsync.git --enable
 
 在设置中开启 **允许同步敏感内容**，再通过 **自动写入收到的敏感内容** 选择接收方式：
 
-- **关闭自动写入**：收到的敏感文本只存入本机加密收件区，不改系统剪贴板。新配置默认采用此方式；新条目替换上一条，普通文本不会清空收件区，关闭本地历史也可使用。
-- **开启自动写入**：新的敏感文本直接写入系统剪贴板，保留敏感标记，不另存收件区或普通历史。旧配置缺少新字段时保留原有自动写入行为；升级后可手动关闭。切换方式不会补写、清除已有收件项或重置设备身份和游标。
+- **关闭自动写入**：收到的敏感文本只存入本机加密收件区，不改系统剪贴板。默认采用此方式；新条目替换上一条，普通文本不会清空收件区，关闭本地历史也可使用。
+- **开启自动写入**：新的敏感文本直接写入系统剪贴板，保留敏感标记，不另存收件区或普通历史。切换方式不会补写、清除已有收件项或重置设备身份和游标。
 
 收件区位于主页同步方向下方，历史和设置入口仍在最后一栏。正文默认遮罩，点击右侧 **显示** 才读取；关闭面板、进入其他页面、后台断开或收到新条目时重新隐藏。预览最多读取并显示开头 64 KiB，面板最多显示四行；**复制到剪贴板** 始终由 Rust 复制完整原文并携带敏感标记，不触发自动重复推送。收到时间使用当前系统语言和本机时区。
 
-**删除** 仅删除本机当前收件项，不删除服务端内容或已复制到系统剪贴板的内容，也不会导致旧条目再次收到。显示、复制和删除都校验消息 ID；条目已经更新时，旧请求会被拒绝。已有旧历史没有敏感标记，无法自动识别和清理其中可能存在的敏感正文。
+**删除** 仅删除本机当前收件项，不删除服务端内容或已复制到系统剪贴板的内容，也不会导致旧条目再次收到。显示、复制和删除都校验消息 ID；条目已经更新时，旧请求会被拒绝。
 
 主面板和历史面板可以从顶栏打开，也可运行以下命令；快捷键由用户自行配置，插件不会自动修改键位。在历史面板中点击 **返回** 可进入主面板：
 
@@ -194,7 +186,7 @@ omarchy shell io.github.infinifar.omaclipsync toggle
 
 同步内容上限为 10 MiB，元数据上限为 16 KiB。自动和手动推送以及接收默认跳过应用标记的敏感内容；开启后按设置存入加密收件区或写入系统剪贴板。普通历史不会新增标记为敏感的推送或接收正文。检测依赖复制来源提供敏感标记，无法识别未标记的秘密内容。更改敏感同步开关时会丢弃等待处理的剪贴板事件并重启监听。插件无法使用原生监听时会暂停同步，避免无法识别自身写入造成循环。
 
-敏感收件正文与设备游标一起保存到既有 AES-GCM 加密状态中，密钥保存在 Secret Service。后台状态和通知不包含正文，显示、复制和删除操作只访问本机，不增加服务端轮询。自动写入或手动复制会附带密码管理器敏感标记；支持该标记的系统历史管理器可能不保存它，但其他应用仍可读取当前剪贴板。HTTPS 保护传输，服务端仍可读取正文。
+敏感收件正文与设备游标一起保存到 AES-GCM 加密状态中，密钥保存在 Secret Service。后台状态和通知不包含正文，显示、复制和删除操作只访问本机，不增加服务端轮询。自动写入或手动复制会附带密码管理器敏感标记；支持该标记的系统历史管理器可能不保存它，但其他应用仍可读取当前剪贴板。HTTPS 保护传输，服务端仍可读取正文。
 
 | 数据 | 默认位置 | 说明 |
 | --- | --- | --- |
@@ -206,20 +198,18 @@ omarchy shell io.github.infinifar.omaclipsync toggle
 
 设置了 `XDG_CONFIG_HOME`、`XDG_DATA_HOME` 或 `XDG_STATE_HOME` 时，相应路径以这些目录为准。关闭历史后不会读取或写入历史文件，但已有文件不会自动删除。历史收藏不计入普通历史条数上限；所有记录仍受 16 MiB 文件上限约束。
 
-## 卸载与回退
+## 卸载
 
 ```sh
 omarchy plugin disable io.github.infinifar.omaclipsync
 omarchy plugin remove io.github.infinifar.omaclipsync
 ```
 
-移除插件不会自动删除配置、历史、日志或密钥环项，请按需自行清理。手动复制安装的目录在某些 Omarchy 版本中可能被移至隐藏备份；请留意命令输出。重新启用旧 `omaclipsync` 插件前，请先禁用新插件，避免两个客户端同时运行。回退到 v0.1.1 前应备份历史文件并取消全部收藏：该版本无法读取包含收藏字段的历史。
-
-回退到旧版本时，请先备份配置，并在启动旧版服务前从 JSON 配置中移除旧版不支持的字段（例如 `sync.autoApplySensitive`、`sync.allowSensitive`、`sync.direction` 或 `sync.notifyOnSuccess`）；旧版会拒绝未知配置字段。回退前也应备份加密状态；不支持收件区的旧版可能在保存状态时丢弃收件项。
+移除插件不会自动删除配置、历史、日志或密钥环项，请按需自行清理。手动复制安装的目录在某些 Omarchy 版本中可能被移至隐藏备份；请留意命令输出。
 
 ## 从源码构建
 
-RustClipSync 同步逻辑在相邻的 `rustclipsync-core` 项目中统一维护。本仓库的 `core/vendor/rustclipsync-core` 是自动导出的源码快照，`UPSTREAM.json` 记录逐文件校验值，因此单独克隆插件也能编译。更新共享核心后运行 `bash scripts/sync-core.sh` 重新导出，增加 `--check` 可核对是否完全一致；不要直接编辑快照。既有状态文件名、密钥环账户和加密状态格式保持兼容。
+RustClipSync 同步逻辑在相邻的 `rustclipsync-core` 项目中统一维护。本仓库的 `core/vendor/rustclipsync-core` 是自动导出的源码快照，`UPSTREAM.json` 记录逐文件校验值，因此单独克隆插件也能编译。更新共享核心后运行 `bash scripts/sync-core.sh` 重新导出，增加 `--check` 可核对是否完全一致；不要直接编辑快照。
 
 需要 Rust、Cargo、Clippy、`jq` 和 GNU `tar`；集成测试还需要 Python 3 和 OpenSSL。在源码目录运行：
 
