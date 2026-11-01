@@ -1,6 +1,9 @@
-name: Publish release assets
+name: Rebuild, compare and publish native assets
 
 on:
+  push:
+    branches: [main]
+  workflow_dispatch:
   release:
     types: [published]
 
@@ -10,24 +13,28 @@ permissions:
 jobs:
   assets:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out the release tag
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || github.sha }}
           persist-credentials: false
-      - name: Package the committed Linux x86_64 binaries
+      - name: Rebuild both executables and compare against the committed bytes
+        shell: bash
+        run: ./scripts/reproducible-build.sh
+      - name: Package the verified source build
         shell: bash
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
           version=$(jq -er '.version' manifest.json)
-          [[ "$RELEASE_TAG" == "v$version" ]]
-          ./scripts/package.sh --use-bundled
-          (cd dist && sha256sum "omaclipsync-plugin-$version.tar.gz" syncclipd-linux-x86_64 > SHA256SUMS)
+          [[ -z "$RELEASE_TAG" || "$RELEASE_TAG" == "v$version" ]]
+          ./scripts/package.sh --use-verified
+          (cd dist && sha256sum "omaclipsync-plugin-$version.tar.gz" syncclipd-linux-x86_64 syncclipctl-linux-x86_64 BUILD-EVIDENCE.txt > SHA256SUMS)
       - name: Attach assets to the release
+        if: github.event_name == 'release'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -36,4 +43,4 @@ jobs:
           set -euo pipefail
           version=$(jq -er '.version' manifest.json)
           [[ "$RELEASE_TAG" == "v$version" ]]
-          gh release upload "$RELEASE_TAG" "dist/omaclipsync-plugin-$version.tar.gz" dist/syncclipd-linux-x86_64 dist/SHA256SUMS
+          gh release upload "$RELEASE_TAG" "dist/omaclipsync-plugin-$version.tar.gz" dist/syncclipd-linux-x86_64 dist/syncclipctl-linux-x86_64 dist/BUILD-EVIDENCE.txt dist/SHA256SUMS

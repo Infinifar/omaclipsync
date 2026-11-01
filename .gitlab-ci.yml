@@ -2,6 +2,7 @@ stages:
   - fmt
   - clippy
   - test
+  - reproduce
   - package
   - release
 
@@ -44,13 +45,27 @@ test:
     - gjs tests/settings.gjs Settings.js
     - gjs tests/inbox.test.js Inbox.js
 
+reproduce:
+  stage: reproduce
+  script:
+    - ./scripts/reproducible-build.sh
+  artifacts:
+    paths:
+      - dist/native/
+      - dist/BUILD-EVIDENCE.txt
+    expire_in: 30 days
+
 package:
   stage: package
   script:
-    - ./scripts/package.sh
+    - ./scripts/package.sh --use-verified
+    - cd dist && sha256sum omaclipsync-plugin-*.tar.gz syncclipd-linux-x86_64 syncclipctl-linux-x86_64 BUILD-EVIDENCE.txt > SHA256SUMS
   artifacts:
     paths:
       - dist/syncclipd-linux-x86_64
+      - dist/syncclipctl-linux-x86_64
+      - dist/BUILD-EVIDENCE.txt
+      - dist/SHA256SUMS
       - dist/omaclipsync-plugin-*.tar.gz
     expire_in: 30 days
 

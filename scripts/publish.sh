@@ -8,13 +8,13 @@ version=$(jq -er '.version' "$root/manifest.json")
 [[ $CI_JOB_TOKEN =~ ^[A-Za-z0-9._-]+$ ]] || { printf '%s\n' 'Unexpected job token format.' >&2; exit 1; }
 base="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/omaclipsync/$version"
 tarball="omaclipsync-plugin-$version.tar.gz"
-for file in syncclipd-linux-x86_64 "$tarball"; do
+for file in syncclipd-linux-x86_64 syncclipctl-linux-x86_64 BUILD-EVIDENCE.txt SHA256SUMS "$tarball"; do
   [[ -f "$root/dist/$file" ]] || { printf 'Missing artifact: %s\n' "$file" >&2; exit 1; }
   printf 'header = "JOB-TOKEN: %s"\n' "$CI_JOB_TOKEN" | curl --config - --fail --silent --show-error --max-time 120 --upload-file "$root/dist/$file" "$base/$file" --output /dev/null
 done
 body=$(mktemp)
 trap 'rm -f -- "$body"' EXIT
-jq -n --arg tag "$CI_COMMIT_TAG" --arg bin "$base/syncclipd-linux-x86_64" --arg tar "$base/$tarball" \
-  '{name:$tag,tag_name:$tag,assets:{links:[{name:"syncclipd-linux-x86_64",url:$bin},{name:"Plugin archive",url:$tar}]}}' > "$body"
+jq -n --arg tag "$CI_COMMIT_TAG" --arg bin "$base/syncclipd-linux-x86_64" --arg ctl "$base/syncclipctl-linux-x86_64" --arg evidence "$base/BUILD-EVIDENCE.txt" --arg sums "$base/SHA256SUMS" --arg tar "$base/$tarball" \
+  '{name:$tag,tag_name:$tag,assets:{links:[{name:"syncclipd-linux-x86_64",url:$bin},{name:"syncclipctl-linux-x86_64",url:$ctl},{name:"BUILD-EVIDENCE.txt",url:$evidence},{name:"SHA256SUMS",url:$sums},{name:"Plugin archive",url:$tar}]}}' > "$body"
 printf 'header = "JOB-TOKEN: %s"\n' "$CI_JOB_TOKEN" | curl --config - --fail --silent --show-error --max-time 30 --request POST --header 'Content-Type: application/json' --data-binary "@$body" "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases" --output /dev/null
 printf 'Published release %s\n' "$CI_COMMIT_TAG"

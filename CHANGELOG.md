@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4 (2026-10-31)
+
+- Pin the native build image, compiler/linker and paths; rebuild and byte-compare both committed executables in GitHub/GitLab CI before packaging.
+- Publish the exact-commit build evidence and both executable checksums alongside the verified archive. Preserve existing release tags.
+- Document the full native delta from the listed marketplace snapshot and the limits of build provenance versus security approval. No synchronization behavior changes.
+
 ## 0.2.3 (2026-10-31)
 
 - Replace documentation screenshots with fresh English UI captures, using harmless sample text and redacted account details.
