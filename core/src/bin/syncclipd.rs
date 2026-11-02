@@ -79,6 +79,7 @@ struct App {
     clipboard_latest: Arc<Mutex<Option<(u64, u64, wayland::ClipboardChange)>>>,
     clipboard_serial: Arc<AtomicU64>,
     processed_clipboard_serial: u64,
+    ignore_clipboard_through: u64,
     active_watcher: Arc<Mutex<u64>>,
     state: &'static str,
     last_sync: Option<u64>,
@@ -120,6 +121,7 @@ impl App {
             clipboard_latest: Arc::new(Mutex::new(None)),
             clipboard_serial: Arc::new(AtomicU64::new(0)),
             processed_clipboard_serial: 0,
+            ignore_clipboard_through: 0,
             active_watcher: Arc::new(Mutex::new(0)),
             state: "needs_config",
             last_sync: None,
@@ -595,7 +597,10 @@ impl App {
             .ok()
             .and_then(|mut latest| latest.take());
         if let Some((generation, serial, change)) = change {
-            if generation == self.watcher_generation && self.wants_watcher() {
+            if generation == self.watcher_generation
+                && serial > self.ignore_clipboard_through
+                && self.wants_watcher()
+            {
                 self.processed_clipboard_serial = serial;
                 if !self.config.sync.direction.can_push() {
                     return;
@@ -692,8 +697,28 @@ impl App {
                 return;
             }
             let observed = self.clipboard_serial.load(Ordering::SeqCst);
-            match self.session.as_mut().unwrap().flush(observed) {
+            let session = self.session.as_mut().unwrap();
+            let recovering = session.persisted.state.resolving_conflict;
+            let (result, recovering) = match session.flush(observed) {
+                Err(SyncError::Conflict) => (session.recover_upload_conflict(observed), true),
+                result => (result, recovering),
+            };
+            match result {
                 Ok(outcome) => {
+                    if recovering && outcome == Outcome::Skipped {
+                        // Events captured while cancellation/skip was in flight
+                        // have no fresh upload base. Keep the actual selection,
+                        // and wait for a new event after this recovery barrier.
+                        if let Ok(_active) = self.active_watcher.lock() {
+                            self.ignore_clipboard_through =
+                                self.clipboard_serial.load(Ordering::SeqCst);
+                            self.processed_clipboard_serial = self.ignore_clipboard_through;
+                            if let Ok(mut latest) = self.clipboard_latest.lock() {
+                                *latest = None;
+                            }
+                        }
+                        self.log(Event::ConflictSkipped);
+                    }
                     self.note_outcome(&outcome);
                     emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
                 }

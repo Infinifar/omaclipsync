@@ -99,3 +99,9 @@ required. It checks registration, latest-only receive, stable retry IDs, restart
 without replay, sensitive filtering and conflict preservation under both modes.
 Windows native CI and physical Android/desktop integration remain platform
 checks; success of these protocol fixtures does not claim those validations.
+
+## 2026-11-02：显式安全冲突恢复
+
+新增回归测试在仅返回 Conflict 的实现下实测失败，再实现可选恢复并通过。
+覆盖旧上传／排队文本不重传、保留系统剪贴板、跳过当时远端、恢复后的新复制可发送；也覆盖取消时发现已经提交的上传、取消前后网络失败与重新打开、恢复期间禁止接收覆盖、持久化失败前无网络副作用、epoch 变化不被当作普通冲突恢复。
+旧默认冲突测试仍通过，调用方必须显式选择恢复。67 项 Rust 测试与严格 Clippy 通过。

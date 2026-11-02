@@ -1,5 +1,7 @@
 # Changelog
 
+Direction-routing branch: safely cancel/skip conflicting automatic uploads, preserve the local clipboard, and resume fresh copy events with durable restart recovery.
+
 ## 0.3.0 (2026-11-01)
 
 - Fix sensitive-policy hot reload through shared core `b19057b`: disabling sensitive synchronization while marked text remains on the clipboard no longer blocks ordinary receives. Real clipboard failures and sensitive receive filtering remain enforced.

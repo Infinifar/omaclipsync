@@ -22,6 +22,7 @@ pub enum Event {
     HistoryError,
     ClipboardError,
     ConfigError,
+    ConflictSkipped,
     WorkerCrashed,
     Shutdown,
     Polled,
@@ -48,9 +49,11 @@ impl Event {
     fn level(self) -> Level {
         match self {
             Self::ConfigError | Self::WorkerCrashed => Level::Error,
-            Self::Offline | Self::AuthFailed | Self::HistoryError | Self::ClipboardError => {
-                Level::Warn
-            }
+            Self::Offline
+            | Self::AuthFailed
+            | Self::HistoryError
+            | Self::ClipboardError
+            | Self::ConflictSkipped => Level::Warn,
             Self::Polled => Level::Debug,
             _ => Level::Info,
         }

@@ -149,7 +149,8 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
             persisted.state.recover_ambiguous_apply();
             storage.save(&state::seal(&key, &persisted)?)?;
         }
-        let needs_pending_check = persisted.state.pending.is_some();
+        let needs_pending_check =
+            persisted.state.pending.is_some() && !persisted.state.resolving_conflict;
         Ok(Self {
             remote,
             persisted,
@@ -318,6 +319,11 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         sensitive: bool,
         now: Instant,
     ) -> Result<Outcome, SyncError> {
+        if self.persisted.state.resolving_conflict {
+            // Copies made before recovery finishes have no safe conflict base.
+            // Keep the platform selection intact, without queuing a stale retry.
+            return self.record_clear();
+        }
         if !self.can_push() {
             self.record_clear()?;
             return Ok(Outcome::Paused);
@@ -360,7 +366,80 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
     }
 
     pub fn has_pending(&self) -> bool {
-        self.persisted.state.pending.is_some() || self.persisted.state.ack.is_some()
+        self.persisted.state.pending.is_some()
+            || self.persisted.state.ack.is_some()
+            || self.persisted.state.resolving_conflict
+    }
+
+    /// Safely abandon a conflicting upload without replacing either clipboard.
+    ///
+    /// The host opts into skipping the conflict instead of asking for manual resolution.
+    /// Cancels the old outbox (including queued copies), skips the then-current
+    /// authorized remote delivery, and preserves the platform clipboard. Only
+    /// copies made after recovery completes can upload automatically. The durable
+    /// recovery marker makes [`Self::flush`] resume this decision after a restart.
+    ///
+    /// # Errors
+    /// Returns transport, epoch or persistence errors; uncertain work stays durable.
+    pub fn recover_upload_conflict(&mut self, observed: u64) -> Result<Outcome, SyncError> {
+        let policy = self.sync_policy.ok_or(Error::DirectionRequired)?;
+        if policy.paused {
+            return Ok(Outcome::Paused);
+        }
+        if !self.persisted.paired {
+            return Err(SyncError::Epoch);
+        }
+        if self.persisted.state.applying.is_some()
+            || (!self.persisted.state.resolving_conflict && self.persisted.state.pending.is_none())
+        {
+            return Err(SyncError::Conflict);
+        }
+        self.persisted.state.resolving_conflict = true;
+        self.persisted.state.local_clear();
+        self.echo = None;
+        self.needs_pending_check = false;
+        self.save()?;
+        self.remote.ensure_sync_direction(&self.persisted)?;
+        if let Some(pending) = self.persisted.state.pending.clone() {
+            match self.remote.cancel(&self.persisted, &pending) {
+                Ok(Some(revision)) => self
+                    .persisted
+                    .state
+                    .committed(&pending.copy.id, revision)
+                    .map_err(invalid_state)?,
+                Ok(None) => self
+                    .persisted
+                    .state
+                    .cancelled(&pending.copy.id)
+                    .map_err(invalid_state)?,
+                Err(Error::Status(409)) => return Err(SyncError::Epoch),
+                Err(error) => return Err(error.into()),
+            }
+            self.save()?;
+        }
+        let current = self.remote.state(&self.persisted)?;
+        if current.epoch != self.persisted.state.epoch
+            || current.revision < self.persisted.state.cursor
+        {
+            return Err(SyncError::Epoch);
+        }
+        if let Some(message) = current.message() {
+            self.persisted.state.ack = Some(Ack {
+                id: message.id,
+                revision: message.revision,
+                result: if message.source_device_id == self.persisted.state.device_id {
+                    "self"
+                } else {
+                    "skipped"
+                }
+                .into(),
+            });
+        }
+        self.persisted.state.cursor = current.revision;
+        self.persisted.state.resolving_conflict = false;
+        self.save()?;
+        self.flush(observed)?;
+        Ok(Outcome::Skipped)
     }
 
     /// Re-pair using the currently selected direction, after confirmed revocation.
@@ -474,6 +553,9 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
     /// function. A new local event aborts an upload before it is sent.
     /// Restored pending content is checked against the clipboard before sending.
     pub fn flush(&mut self, observed: u64) -> Result<Outcome, SyncError> {
+        if self.persisted.state.resolving_conflict {
+            return self.recover_upload_conflict(observed);
+        }
         if !self.persisted.paired || self.needs_pending_check {
             self.check()?;
         }
@@ -576,7 +658,10 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         if !self.persisted.paired || self.needs_pending_check {
             self.check()?;
         }
-        if self.persisted.state.pending.is_some() || self.persisted.state.applying.is_some() {
+        if self.persisted.state.pending.is_some()
+            || self.persisted.state.applying.is_some()
+            || self.persisted.state.resolving_conflict
+        {
             return Ok(Outcome::Skipped);
         }
         self.pull_target(observed, ReceiveTarget::Foreground)
@@ -623,7 +708,10 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         {
             return Ok(Outcome::Skipped);
         }
-        if self.persisted.state.pending.is_some() || self.persisted.state.applying.is_some() {
+        if self.persisted.state.pending.is_some()
+            || self.persisted.state.applying.is_some()
+            || self.persisted.state.resolving_conflict
+        {
             return Ok(Outcome::Skipped);
         }
         // There is no outbox here: flush only the durable acknowledgement,

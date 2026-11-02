@@ -253,3 +253,14 @@ syncclipctl forget-pairing --confirm-remote-revocation-unconfirmed
 This requires the running plugin and queues an explicitly confirmed local-only operation. Check status afterwards. It removes the local device token, pending outbox and sensitive inbox; history and key-store entries remain. It never claims the remote token was revoked; remote access may remain until the old administrator removes that token. Configure the new server and pair afterwards. A protocol mismatch is never accepted as successful revocation.
 
 HTTP fallback has a 30-second online lease, distinct from the admin activity badge. A zero server backfill window disables offline storage/replay but does not disable eligible online real-time delivery.
+
+### Automatic upload conflicts
+
+On the direction-routing branch, a rejected automatic upload no longer freezes
+synchronization until restart. The engine durably cancels the conflicting
+outbox and already queued copies, skips the then-current remote delivery, and
+keeps the system clipboard unchanged. It does not rebase/re-upload rejected
+text. Clipboard events observed during recovery are discarded; a fresh copy
+after recovery synchronizes normally. Network failures or restarts resume the
+same cancellation/skip decision. Fixed `conflict_skipped` logs contain no text
+or credentials. Storage, epoch and credential failures still stop safely.

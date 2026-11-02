@@ -74,6 +74,9 @@ pub struct State {
     pub discard_pending: bool,
     pub applying: Option<Message>,
     pub ack: Option<Ack>,
+    /// Durable opt-in decision to cancel a conflict and skip its remote value.
+    #[serde(default)]
+    pub resolving_conflict: bool,
 }
 
 impl State {
@@ -87,6 +90,7 @@ impl State {
             discard_pending: false,
             applying: None,
             ack: None,
+            resolving_conflict: false,
         }
     }
 
