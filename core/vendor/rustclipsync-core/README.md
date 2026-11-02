@@ -39,6 +39,7 @@ Synchronization entry points check restored pending content against the current 
 
 ## Protocol and privacy constraints
 
+- Turning off sensitive synchronization while the current clipboard is marked sensitive does not block normal receives. Receive-side snapshot checks treat the policy rejection as an unavailable text value without reading its body; actual clipboard I/O failures still stop the operation. Incoming marked text remains filtered when sensitive synchronization is disabled.
 - Connects to the [RustClipSync server](https://github.com/Infinifar/rustclipsync-server) using its [protocol](https://github.com/Infinifar/rustclipsync-server/blob/main/PROTOCOL.md). Legacy SyncClipboard HTTP/SignalR transport is not implemented.
 - A UUID identifies one copy event and remains stable across retries. Revisions determine order; epochs separate server resets. Client time is used only for retry expiry, not ordering or uniqueness.
 - Automatic uploads do not silently overwrite conflicts; offline synchronization keeps only the latest value. When an upload outcome is uncertain, retain the request and resolve or cancel it before processing a newer value.

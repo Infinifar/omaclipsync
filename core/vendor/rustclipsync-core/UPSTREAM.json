@@ -5,8 +5,8 @@
   "files": {
     "Cargo.toml": "9dd4181b02f4aad95c9b33bfe6e02aa3afc57b84ef80bbe368f8cd17930247e0",
     "LICENSE": "e2a1c93da3bd7ecef573b225d7f159213fc89440b22487d1930b4c58a99bf84c",
-    "README.md": "8d50ea05c3f596d8207e67a39d52d0beb19bb426fa168190102e666f059ca4ca",
-    "VALIDATION.md": "1109ece493b8462bc34b76a22f3583001e61990cedfaa83d67c11c9d23014c11",
+    "README.md": "f18fac300f780250769f8b6e4fd703ad56869d22bb809a9c02a6bab49d81fe00",
+    "VALIDATION.md": "b6289827d1e405c66caab350b8a90a323ee8be62cbcfc09f03c5add69ecc8639",
     "src/adapters.rs": "4c87eba6a900c9a9b2ab503190d9a4542d470bb3f1ddac951126c1f94315174f",
     "src/client.rs": "04ef877bfb632f896a292b5ef369275a2ffb63be0ec3068b0889c80cac75c313",
     "src/control.rs": "2aeb3f1e881eb5d7585d7eb13195c6a7cb40689f0c64c5ab3bf572a090690b8f",
@@ -14,7 +14,7 @@
     "src/error.rs": "43f77948b64dce26b648d504db731418624f7cfea395779baddf8d81ee602c6d",
     "src/filter.rs": "10444993546bc3164f2a103e7e4198b873c1363e7b19aba92aac518d531b7a16",
     "src/lib.rs": "5ae509b679a39d3330e22617fe671927f35b7ca62926247aac1b1f1e85a4c4ed",
-    "src/session.rs": "767819ca52463611e2d91c2cc8b1f2c30a3aafee016bd04cf1801a17ccb8b3fc",
+    "src/session.rs": "9c08aae9e598624938ad3e37608dd067d08d16d1b9496d16d1b175b4f19cadf4",
     "src/state.rs": "753afe8f56e791ec8bba9f5469ba3aae57c4ca67dda73ddffe0317e2daa34e44",
     "src/transport.rs": "bb14467a2df787850c4ea73efe431296f6c314fd233a0a70a0af369e23064807",
     "src/worker.rs": "773e0d90ddb3b227aeb647c548cdb1dc3a8b3bbe68586c2d1ce90c6862ebc249"

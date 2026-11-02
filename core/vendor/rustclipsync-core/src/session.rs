@@ -640,13 +640,20 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         Ok(result)
     }
 
+    fn receive_snapshot(&self) -> Result<Option<(String, bool)>, ClipboardError> {
+        match self.clipboard.snapshot(self.allow_sensitive) {
+            // Adapters may represent a disallowed selection as Sensitive or
+            // None. Neither exposes its body or prevents receiving ordinary text.
+            Err(ClipboardError::Sensitive) if !self.allow_sensitive => Ok(None),
+            result => result,
+        }
+    }
+
     fn pull_target(&mut self, observed: u64, target: ReceiveTarget) -> Result<Outcome, SyncError> {
         let before = if target != ReceiveTarget::Foreground {
             None
         } else {
-            self.clipboard
-                .snapshot(self.allow_sensitive)
-                .map_err(SyncError::Clipboard)?
+            self.receive_snapshot().map_err(SyncError::Clipboard)?
         };
         let remote = self.remote.state(&self.persisted)?;
         if remote.epoch != self.persisted.state.epoch
@@ -713,11 +720,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         }
         if self.generation.load(Ordering::SeqCst) != observed
             || (target == ReceiveTarget::Foreground
-                && self
-                    .clipboard
-                    .snapshot(self.allow_sensitive)
-                    .map_err(SyncError::Clipboard)?
-                    != before)
+                && self.receive_snapshot().map_err(SyncError::Clipboard)? != before)
         {
             return Ok(Outcome::Skipped);
         }
@@ -744,9 +747,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         let unchanged = if self.generation.load(Ordering::SeqCst) != observed {
             Ok(false)
         } else if target == ReceiveTarget::Foreground {
-            self.clipboard
-                .snapshot(self.allow_sensitive)
-                .map(|snapshot| snapshot == before)
+            self.receive_snapshot().map(|snapshot| snapshot == before)
         } else {
             Ok(true)
         };
