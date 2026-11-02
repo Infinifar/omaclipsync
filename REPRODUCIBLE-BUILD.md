@@ -7,7 +7,7 @@ The 0.2.3 release workflow packaged committed files without rebuilding them. Its
 - Target: `x86_64-unknown-linux-gnu` (Linux amd64).
 - Builder: `mirror.gcr.io/library/rust@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b`.
 - Rust/Cargo 1.99.1, Debian GCC 12.2.0 and GNU ld 2.40 are inside that immutable image.
-- `core/Cargo.lock`, the committed vendored `rustclipsync-core` 0.3.0 snapshot and release profile in `core/Cargo.toml` are build inputs.
+- `core/Cargo.lock`, the committed vendored `rustclipsync-core` 0.4.0 snapshot and release profile in `core/Cargo.toml` are build inputs.
 - Source mounts read-only at `/src`; each invocation gets a fresh `/build` directory. `RUSTFLAGS` remaps `/src` to `/omaclipsync`; incremental builds are disabled. `SOURCE_DATE_EPOCH=0`, `TZ=UTC`, `LC_ALL=C`.
 - Cargo fetch may access crates.io to populate the cache. Compilation uses `--locked --offline` with container networking disabled. No desktop sockets, credentials, or application state are mounted. The builder runs source-built Rust regression tests, including isolated daemon/CLI fixture tests, before compiling the release outputs. It never executes the committed executables.
 

@@ -1,10 +1,16 @@
 # Changelog
 
-Direction-routing branch: safely cancel/skip conflicting automatic uploads, preserve the local clipboard, and resume fresh copy events with durable restart recovery.
+## 0.4.0 (2026-11-03)
+
+- Require protocol 3 and RustClipSync Server 3.0.0; report direction/pause before receiving, with fenced WSS sessions and authenticated HTTP fallback.
+- Receive only server-authorized per-device messages, including latest-only reconnect backfill inside the server-configured window.
+- Safely cancel/skip conflicting automatic uploads, preserve the local clipboard, and resume fresh copy events with durable restart and legacy-outbox recovery.
+- Keep ordinary receives working after sensitive synchronization is disabled; retain sensitive filtering and genuine clipboard I/O failures.
+- Preserve pairing, encrypted state and sensitive inbox; rebuild and byte-compare both bundled x86_64 executables before publication.
+- Update English/Chinese documentation and the final shared-core 0.4.0 snapshot. Mobile apps and Fcitx input methods are not released here.
 
 ## 0.3.0 (2026-11-01)
 
-- Fix sensitive-policy hot reload through shared core `b19057b`: disabling sensitive synchronization while marked text remains on the clipboard no longer blocks ordinary receives. Real clipboard failures and sensitive receive filtering remain enforced.
 - Support only the current RustClipSync protocol. Remove the selectable SyncClipboard transport, its profile/file APIs, SignalR connection, fallback watcher and obsolete tests/examples.
 - Remove the protocol selector from saved settings and the panel. An existing selector is consumed without enabling any alternate transport; HTTP endpoints now use `/api/...`; encrypted state filenames and device identities remain unchanged.
 - Rename current Linux adapter modules and the real-time transport label. Retain current synchronization, sensitive inbox, history, direction and recovery behavior.

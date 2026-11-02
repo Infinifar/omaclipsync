@@ -1,6 +1,6 @@
 # Omaclipsync
 
-Version **0.2.4**. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.4), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
+Version **0.4.0**. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.0), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
 
 Build provenance: release CI rebuilds both native executables in a digest-pinned container and compares them byte for byte before packaging. See [reproduction instructions](REPRODUCIBLE-BUILD.md) and the [native review guide](NATIVE-REVIEW.md). This does not replace marketplace security review.
 
@@ -17,7 +17,7 @@ For Android, use the [Fcitx5 Android input method](https://github.com/Infinifar/
 Desktop resource usage for the current implementation still needs separate measurement.
 
 <p align="center">
-  <img src="preview.png" alt="Omaclipsync 0.2.4 main panel" width="578">
+  <img src="preview.png" alt="Omaclipsync main panel" width="578">
 </p>
 
 Screenshots were captured from the real Omarchy plugin in English. Server details and last-sync values are hidden; revealed text below is a harmless test fixture.
@@ -33,6 +33,9 @@ Screenshots were captured from the real Omarchy plugin in English. Server detail
 </p>
 
 Only the current RustClipSync protocol is supported; there is no protocol selector or SyncClipboard compatibility transport. HTTP endpoints use `/api/...`; update the server and clients together.
+
+
+This release requires **wire protocol 3** and **RustClipSync Server 3.0.0**; matching standalone Desktop is **0.5.0** and shared core is **0.4.0**. Mobile apps and Fcitx input methods are released separately; check their protocol support before upgrading a shared server. Older clients need server 2.0.0.
 
 ## Features
 
@@ -256,7 +259,7 @@ HTTP fallback has a 30-second online lease, distinct from the admin activity bad
 
 ### Automatic upload conflicts
 
-On the direction-routing branch, a rejected automatic upload no longer freezes
+In version 0.4.0, a rejected automatic upload no longer freezes
 synchronization until restart. The engine durably cancels the conflicting
 outbox and already queued copies, skips the then-current remote delivery, and
 keeps the system clipboard unchanged. It does not rebase/re-upload rejected

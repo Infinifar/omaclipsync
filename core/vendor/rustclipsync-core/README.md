@@ -4,6 +4,19 @@ English · [简体中文](README-ZH.md)
 
 The shared Rust core for RustClipSync clients, extracted from the Omaclipsync 0.2.0 synchronization implementation. Linux and Windows clients reuse its message state machine and HTTPS protocol with platform-specific adapters. This is a client library, not a server or a standalone desktop application.
 
+## Release 0.4.0
+
+[Release notes](releases/v0.4.0.md) · [GitHub release](https://github.com/Infinifar/rustclipsync-core/releases/tag/v0.4.0)
+
+| Component | Matching release |
+| --- | --- |
+| Server | 3.0.0, wire protocol 3 |
+| Shared core | 0.4.0 |
+| Windows/Linux desktop | 0.5.0 |
+| Omaclipsync | 0.4.0 |
+
+Mobile apps and Fcitx input methods are released separately. Check their wire-protocol support before switching a shared server; older clients need server 2.0.0. This release does not merge or publish those client projects.
+
 ## Current API
 
 All network operations use `/api/...` and require wire protocol **3**. This release deliberately rejects older servers and clients: deploy matching versions together, or keep old clients on the previous server. Device credentials and the encrypted-state format remain unchanged. Rust desktop clients and Omaclipsync consume exported snapshots of this repository; endpoint logic must be changed here and re-exported.

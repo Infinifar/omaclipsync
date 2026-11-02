@@ -1,6 +1,6 @@
 # Omaclipsync
 
-当前版本 **0.2.4**，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.2.4)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
+当前版本 **0.4.0**，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.0)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
 
 构建来源：发布 CI 在摘要固定的容器中从源码重建两个可执行文件，逐字节比较通过后才打包。参见[复现构建说明](REPRODUCIBLE-BUILD.md)及[原生代码审核索引](NATIVE-REVIEW.md)。这不等于市场安全审核通过。
 
@@ -17,7 +17,7 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 当前实现的实际桌面资源占用尚需单独测量。
 
 <p align="center">
-  <img src="preview.png" alt="Omaclipsync 0.2.4 主面板" width="578">
+  <img src="preview.png" alt="Omaclipsync 主面板" width="578">
 </p>
 
 截图来自实际运行的英文 Omarchy 插件界面，服务器信息和最近同步时间已遮盖；下方显示的正文仅为无敏感信息的测试文本。
@@ -33,6 +33,9 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 </p>
 
 仅支持当前 RustClipSync 协议，不提供协议选择项或 SyncClipboard 兼容传输；HTTP 接口统一使用 `/api/...` 前缀。
+
+
+本版本要求**协议 3**，配套**服务端 3.0.0**、独立桌面端 **0.5.0** 和共享 core **0.4.0**。移动端及 Fcitx 输入法单独发布，升级共享服务端前请确认它们的协议支持；旧客户端需使用服务端 2.0.0。
 
 ## 特点
 
@@ -256,4 +259,4 @@ HTTP 降级使用 30 秒在线租约，与管理页活动标记独立。服务�
 
 ### 自动上传冲突
 
-在同步方向开发分支中，自动上传被拒绝后会持久化取消旧上传和已排队的复制，跳过当时的远端消息，并保留系统剪贴板，不再停留在 `conflict` 等待重启。不会抬高旧文本的版本或重传它；恢复期间已观察到的监听事件也会丢弃，恢复后的新复制正常同步。断网或重启后继续同一取消／跳过流程。日志使用固定的 `conflict_skipped` 事件，不记录正文或凭据。存储、epoch 和凭据错误继续安全停止。
+从 0.4.0 开始，自动上传被拒绝后会持久化取消旧上传和已排队的复制，跳过当时的远端消息，并保留系统剪贴板，不再停留在 `conflict` 等待重启。不会抬高旧文本的版本或重传它；恢复期间已观察到的监听事件也会丢弃，恢复后的新复制正常同步。断网或重启后继续同一取消／跳过流程。日志使用固定的 `conflict_skipped` 事件，不记录正文或凭据。存储、epoch 和凭据错误继续安全停止。

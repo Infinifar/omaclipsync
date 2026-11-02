@@ -5,7 +5,7 @@
   "files": {
     "Cargo.toml": "9dd4181b02f4aad95c9b33bfe6e02aa3afc57b84ef80bbe368f8cd17930247e0",
     "LICENSE": "e2a1c93da3bd7ecef573b225d7f159213fc89440b22487d1930b4c58a99bf84c",
-    "README.md": "a432bfedb010253575b153244c7ce4f402c61e0bf02f0857f4fcdab53237ca35",
+    "README.md": "648e1c14ee996f5745e4c104001fe4840789b6917201a986b35f5f556ace5ec0",
     "VALIDATION.md": "e6202977cc4cb2e8e020513b30ca1ffd54bab8010513f328044f6e57c9d43efc",
     "src/adapters.rs": "4c87eba6a900c9a9b2ab503190d9a4542d470bb3f1ddac951126c1f94315174f",
     "src/client.rs": "04ef877bfb632f896a292b5ef369275a2ffb63be0ec3068b0889c80cac75c313",
