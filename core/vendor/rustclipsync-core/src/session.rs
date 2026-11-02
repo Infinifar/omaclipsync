@@ -104,6 +104,7 @@ pub struct Session<C, S, H, R = Client> {
     needs_pending_check: bool,
     sensitive_inbox: bool,
     sync_policy: Option<Policy>,
+    observed_revision: u64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -151,6 +152,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         }
         let needs_pending_check =
             persisted.state.pending.is_some() && !persisted.state.resolving_conflict;
+        let observed_revision = persisted.state.cursor;
         Ok(Self {
             remote,
             persisted,
@@ -166,6 +168,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
             needs_pending_check,
             sensitive_inbox: false,
             sync_policy: None,
+            observed_revision,
         })
     }
 
@@ -299,6 +302,7 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         {
             return Err(SyncError::Epoch);
         }
+        self.observed_revision = remote.revision;
         if remote.ack_revision > self.persisted.state.cursor {
             self.persisted.state.cursor = remote.ack_revision;
             self.save()?;
@@ -369,6 +373,20 @@ impl<C: Clipboard, S: StateStore, H: HistorySink, R: Transport> Session<C, S, H,
         self.persisted.state.pending.is_some()
             || self.persisted.state.ack.is_some()
             || self.persisted.state.resolving_conflict
+    }
+
+    /// Whether an attempted outbox predates a server revision seen by `check`.
+    ///
+    /// Its commit may be uncertain. Hosts choosing safe skip recovery must use
+    /// cancellation, rather than resending or silently changing its base revision.
+    pub fn has_observed_upload_conflict(&self) -> bool {
+        self.persisted
+            .state
+            .pending
+            .as_ref()
+            .is_some_and(|pending| {
+                pending.attempted && pending.base_revision < self.observed_revision
+            })
     }
 
     /// Safely abandon a conflicting upload without replacing either clipboard.

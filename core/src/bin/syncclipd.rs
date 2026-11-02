@@ -568,6 +568,19 @@ impl App {
         self.backoff = (self.backoff * 2).min(30);
     }
 
+    fn conflict_recovered(&mut self) {
+        // Clipboard callbacks may still be reading an offer when recovery ends.
+        // Fence both buffered and in-flight events before accepting fresh copies.
+        if let Ok(_active) = self.active_watcher.lock() {
+            self.ignore_clipboard_through = self.clipboard_serial.load(Ordering::SeqCst);
+            self.processed_clipboard_serial = self.ignore_clipboard_through;
+            if let Ok(mut latest) = self.clipboard_latest.lock() {
+                *latest = None;
+            }
+        }
+        self.log(Event::ConflictSkipped);
+    }
+
     fn tick_sync(&mut self, out: &mut impl Write, now: Instant) {
         if !self.config.sync.enabled
             && self.session.is_some()
@@ -654,6 +667,29 @@ impl App {
                 self.sync_failure(error);
                 return;
             }
+            // Old installations may already have a frozen outbox. Recover it
+            // before ordinary cancel/pull can replace the user's local selection.
+            if self
+                .session
+                .as_ref()
+                .unwrap()
+                .has_observed_upload_conflict()
+            {
+                let observed = self.clipboard_serial.load(Ordering::SeqCst);
+                match self
+                    .session
+                    .as_mut()
+                    .unwrap()
+                    .recover_upload_conflict(observed)
+                {
+                    Ok(Outcome::Skipped) => self.conflict_recovered(),
+                    Ok(_) => {}
+                    Err(error) => {
+                        self.sync_failure(error);
+                        return;
+                    }
+                }
+            }
             self.needs_check = false;
             self.pull_pending = true;
             if self.config.sync.direction.can_receive() {
@@ -706,18 +742,7 @@ impl App {
             match result {
                 Ok(outcome) => {
                     if recovering && outcome == Outcome::Skipped {
-                        // Events captured while cancellation/skip was in flight
-                        // have no fresh upload base. Keep the actual selection,
-                        // and wait for a new event after this recovery barrier.
-                        if let Ok(_active) = self.active_watcher.lock() {
-                            self.ignore_clipboard_through =
-                                self.clipboard_serial.load(Ordering::SeqCst);
-                            self.processed_clipboard_serial = self.ignore_clipboard_through;
-                            if let Ok(mut latest) = self.clipboard_latest.lock() {
-                                *latest = None;
-                            }
-                        }
-                        self.log(Event::ConflictSkipped);
+                        self.conflict_recovered();
                     }
                     self.note_outcome(&outcome);
                     emit_sync_success(out, &outcome, self.config.sync.notify_on_success);
