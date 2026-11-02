@@ -4,6 +4,8 @@
 
 pub mod adapters;
 pub mod client;
+mod control;
+pub mod direction;
 mod error;
 mod filter;
 pub mod session;

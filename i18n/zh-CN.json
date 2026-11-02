@@ -108,5 +108,10 @@
   "inbox_delete": "删除",
   "inbox_copied": "已复制到剪贴板",
   "inbox_stale": "收件内容已更新或删除，请重试。",
-  "inbox_failed": "操作失败，请检查后台状态后重试。"
+  "inbox_failed": "操作失败，请检查后台状态后重试。",
+  "protocol_unsupported": "协议版本不匹配，请同时升级客户端与服务端",
+  "direction_unconfirmed": "本地方向已保存，服务端尚未确认；接收保持关闭",
+  "revocation_unconfirmed": "撤销结果尚未确认，原配对已保留；更换账户前请重试",
+  "direction_blocked": "当前方向或暂停状态不允许此操作",
+  "direction_superseded": "方向会话已更新或撤销，自动同步已停止；请明确重新选择方向或重新配对"
 }

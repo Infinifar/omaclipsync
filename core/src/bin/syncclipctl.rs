@@ -10,7 +10,7 @@ use std::{
 };
 
 fn usage() {
-    eprintln!("Usage: syncclipctl status | push | pull [--force] | toggle | watch | config");
+    eprintln!("Usage: syncclipctl status | push | pull [--force] | toggle | watch | config | forget-pairing --confirm-remote-revocation-unconfirmed");
 }
 fn ipc(method: &str) -> bool {
     match Command::new("omarchy-shell")
@@ -39,6 +39,12 @@ fn config_path() -> Option<PathBuf> {
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let success = match args.as_slice() {
+        [cmd, flag]
+            if cmd == "forget-pairing" && flag == "--confirm-remote-revocation-unconfirmed" =>
+        {
+            eprintln!("Local-only forget requested: remote revocation remains UNCONFIRMED. Revoke the old device token with its server administrator. Local pending/inbox data will be removed; history and key-store entries remain.");
+            ipc("forgetPairingUnconfirmed")
+        }
         [cmd] if cmd == "status" => ipc("status"),
         [cmd] if cmd == "push" => ipc("push"),
         [cmd] if cmd == "pull" => ipc("pull"),

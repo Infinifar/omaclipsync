@@ -175,6 +175,16 @@ impl App {
         self.apply(config);
     }
     fn apply(&mut self, config: Config) {
+        if (config.sync.direction != self.config.sync.direction
+            || config.sync.enabled != self.config.sync.enabled)
+            && self.session.is_some()
+            && self.session.as_mut().unwrap().record_clear().is_err()
+        {
+            self.state = "storage_error";
+            self.stop_notifications();
+            self.stop_watcher();
+            return;
+        }
         self.stop_notifications();
         self.stop_watcher();
         self.session = None;
@@ -247,6 +257,31 @@ impl App {
             }
             Err(_) => {
                 self.state = "config_error";
+                return;
+            }
+        }
+        let direction = self.config.sync.direction.server_direction();
+        if let Some(session) = self.session.as_mut() {
+            let result = session
+                .set_sync_direction(direction, !self.config.sync.enabled)
+                .and_then(|_| {
+                    if !self.config.sync.enabled
+                        && session.persisted.paired
+                        && session.persisted.state.discard_pending
+                    {
+                        session
+                            .flush(self.clipboard_serial.load(Ordering::SeqCst))
+                            .map(|_| ())
+                    } else {
+                        Ok(())
+                    }
+                });
+            if let Err(error) = result {
+                self.needs_check = true;
+                self.sync_failure(error);
+                if self.state == "offline" {
+                    self.state = "direction_unconfirmed";
+                }
                 return;
             }
         }
@@ -472,7 +507,41 @@ impl App {
         }
     }
     fn sync_failure(&mut self, error: SyncError) {
+        self.needs_check = true;
+        self.stop_notifications();
         self.state = match error {
+            SyncError::Remote(Error::Protocol(error)) => {
+                use rustclipsync_core::direction::DirectionErrorCode;
+                match error.code {
+                    DirectionErrorCode::ProtocolUnsupported => {
+                        self.conflict = true;
+                        "protocol_unsupported"
+                    }
+                    DirectionErrorCode::VersionStale | DirectionErrorCode::SessionRevoked => {
+                        self.conflict = true;
+                        "direction_superseded"
+                    }
+                    DirectionErrorCode::Unauthenticated | DirectionErrorCode::DeviceMismatch => {
+                        "credentials"
+                    }
+                    DirectionErrorCode::DirectionForbidden => {
+                        self.conflict = true;
+                        "direction_blocked"
+                    }
+                    DirectionErrorCode::InvalidDirection => {
+                        self.conflict = true;
+                        "config_error"
+                    }
+                    DirectionErrorCode::RateLimited | DirectionErrorCode::SessionOffline => {
+                        "offline"
+                    }
+                }
+            }
+            SyncError::Remote(Error::DirectionRequired) => "direction_unconfirmed",
+            SyncError::Remote(Error::Status(426)) => {
+                self.conflict = true;
+                "protocol_unsupported"
+            }
             SyncError::Remote(Error::Status(401 | 403)) | SyncError::Credentials => "credentials",
             SyncError::Remote(Error::Status(409)) | SyncError::Conflict => {
                 self.conflict = true;
@@ -498,6 +567,28 @@ impl App {
     }
 
     fn tick_sync(&mut self, out: &mut impl Write, now: Instant) {
+        if !self.config.sync.enabled
+            && self.session.is_some()
+            && now >= self.next_poll
+            && self.state == "direction_unconfirmed"
+        {
+            let direction = self.config.sync.direction.server_direction();
+            let observed = self.clipboard_serial.load(Ordering::SeqCst);
+            let session = self.session.as_mut().unwrap();
+            let result = session
+                .set_sync_direction(direction, true)
+                .and_then(|_| session.flush(observed).map(|_| ()));
+            match result {
+                Ok(()) => self.state = "paused",
+                Err(error) => {
+                    self.sync_failure(error);
+                    if self.state == "offline" {
+                        self.state = "direction_unconfirmed";
+                    }
+                }
+            }
+            self.next_poll = now + Duration::from_secs(self.backoff);
+        }
         let change = self
             .clipboard_latest
             .lock()
@@ -579,6 +670,13 @@ impl App {
                 .unwrap()
                 .persisted
                 .state
+                .discard_pending
+            || self
+                .session
+                .as_ref()
+                .unwrap()
+                .persisted
+                .state
                 .pending
                 .is_none();
         let receive_due = self.config.sync.direction.can_receive()
@@ -646,6 +744,20 @@ impl App {
                     request.params.get("config").cloned().unwrap_or(Value::Null),
                 ) {
                     Ok(config) if config.validate().is_ok() => {
+                        if config.server != self.config.server && self.session.is_some() {
+                            self.stop_notifications();
+                            self.stop_watcher();
+                            if self
+                                .session
+                                .as_mut()
+                                .unwrap()
+                                .revoke_sync_direction()
+                                .is_err()
+                            {
+                                self.state = "revocation_unconfirmed";
+                                return (id, Err("revocation_unconfirmed"), false);
+                            }
+                        }
                         match config.write(&self.paths.config) {
                             Ok(()) => {
                                 self.config_stamp = self.stamp();
@@ -685,7 +797,15 @@ impl App {
                     Err("confirmation_required")
                 } else {
                     self.stop_notifications();
-                    match self.session.as_mut().unwrap().re_pair() {
+                    self.stop_watcher();
+                    self.clipboard_serial.fetch_add(1, Ordering::SeqCst);
+                    let direction = self.config.sync.direction.server_direction();
+                    match self
+                        .session
+                        .as_mut()
+                        .unwrap()
+                        .re_pair_with_direction(direction, !self.config.sync.enabled)
+                    {
                         Ok(()) => {
                             self.conflict = false;
                             self.needs_check = true;
@@ -765,6 +885,9 @@ impl App {
                 }
             }
             "push" if self.session.is_some() => {
+                if !self.config.sync.enabled || !self.config.sync.direction.can_push() {
+                    return (id, Err("direction_blocked"), false);
+                }
                 if self.watcher_cancel.is_none()
                     || self.clipboard_serial.load(Ordering::SeqCst)
                         != self.processed_clipboard_serial
@@ -797,6 +920,9 @@ impl App {
                 }
             }
             "pull" if self.session.is_some() => {
+                if !self.config.sync.enabled || !self.config.sync.direction.can_receive() {
+                    return (id, Err("direction_blocked"), false);
+                }
                 if request.params.get("force").and_then(Value::as_bool) == Some(true) {
                     Err("force_not_supported")
                 } else if self.watcher_cancel.is_none()
@@ -941,6 +1067,51 @@ impl App {
                     .map_err(|_| "history_failed"),
                 None => Err("not_configured"),
             },
+            "forget_pairing" => {
+                if request
+                    .params
+                    .get("confirmRemoteRevocationUnconfirmed")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                {
+                    Err("confirmation_required")
+                } else {
+                    self.stop_notifications();
+                    self.stop_watcher();
+                    self.clipboard_serial.fetch_add(1, Ordering::SeqCst);
+                    self.session = None;
+                    let identity = omaclipsync_core::hash(&format!(
+                        "{}\0{}",
+                        self.config.server.url, self.config.server.user
+                    ));
+                    let state = self.paths.logs.join(format!("v1-{identity}.state"));
+                    let removed = match fs::remove_file(state) {
+                        Ok(()) => Ok(()),
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                        Err(error) => Err(error),
+                    };
+                    self.config.sync.enabled = false;
+                    self.state = "storage_error";
+                    let mut config = Config::default();
+                    config.sync.enabled = false;
+                    if removed
+                        .and_then(|_| {
+                            config
+                                .write(&self.paths.config)
+                                .map_err(|_| io::Error::other("config write failed"))
+                        })
+                        .is_err()
+                    {
+                        Err("config_write_failed")
+                    } else {
+                        self.config = config;
+                        self.config_stamp = self.stamp();
+                        self.config_revision = self.config_revision.wrapping_add(1);
+                        self.state = "needs_config";
+                        Ok(json!({"localPairingRemoved":true,"remoteRevocationConfirmed":false}))
+                    }
+                }
+            }
             "shutdown" => return (id, Ok(json!({})), true),
             _ => Err("unknown_method"),
         };
@@ -1352,6 +1523,110 @@ mod tests {
         );
         assert!(history_text(entries, "../../invalid").is_none());
     }
+    #[test]
+    fn local_forget_requires_confirmation_and_retains_history_and_unrelated_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config: dir.path().join("config.json"),
+            history: dir.path().join("history.json"),
+            logs: dir.path().join("logs"),
+        };
+        fs::create_dir_all(&paths.logs).unwrap();
+        fs::write(&paths.history, b"fixture-encrypted-history").unwrap();
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let mut app = App::new(paths, tx, false);
+        app.config.server.url = "https://example.invalid".into();
+        app.config.server.user = "fixture".into();
+        app.config.write(&app.paths.config).unwrap();
+        let id = omaclipsync_core::hash("https://example.invalid\0fixture");
+        let state = app.paths.logs.join(format!("v1-{id}.state"));
+        fs::write(&state, b"fixture-state").unwrap();
+        let other = app.paths.logs.join("other.state");
+        fs::write(&other, b"other-profile").unwrap();
+        let rejected = app
+            .handle(Request::parse(br#"{"id":1,"method":"forget_pairing"}"#).unwrap())
+            .1;
+        assert_eq!(rejected.unwrap_err(), "confirmation_required");
+        assert!(state.exists());
+        let accepted = app.handle(Request::parse(br#"{"id":2,"method":"forget_pairing","params":{"confirmRemoteRevocationUnconfirmed":true}}"#).unwrap()).1.unwrap();
+        assert_eq!(accepted["remoteRevocationConfirmed"], false);
+        assert!(!state.exists());
+        assert!(app.config.server.url.is_empty());
+        assert!(!Config::read(&app.paths.config).unwrap().sync.enabled);
+        assert_eq!(
+            fs::read(&app.paths.history).unwrap(),
+            b"fixture-encrypted-history"
+        );
+        assert_eq!(fs::read(other).unwrap(), b"other-profile");
+    }
+
+    #[test]
+    fn manual_actions_fail_closed_for_direction_or_pause_before_accessing_clipboard() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config: dir.path().join("config.json"),
+            history: dir.path().join("history.json"),
+            logs: dir.path().join("logs"),
+        };
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let mut app = App::new(paths, tx, false);
+        app.session = Some(fixture_session(
+            dir.path(),
+            History::new(dir.path().join("history.json"), false, 10).unwrap(),
+        ));
+        for (enabled, direction, method, expected) in [
+            (false, SyncDirection::Both, "push", "direction_blocked"),
+            (false, SyncDirection::Both, "pull", "direction_blocked"),
+            (true, SyncDirection::Push, "pull", "direction_blocked"),
+            (true, SyncDirection::Receive, "push", "direction_blocked"),
+            (true, SyncDirection::Both, "push", "clipboard_unavailable"),
+            (true, SyncDirection::Both, "pull", "clipboard_unavailable"),
+        ] {
+            app.config.sync.enabled = enabled;
+            app.config.sync.direction = direction;
+            let req = Request::parse(
+                serde_json::to_vec(&json!({"id":1,"method":method}))
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap();
+            assert_eq!(app.handle(req).1.unwrap_err(), expected);
+        }
+    }
+
+    #[test]
+    fn protocol_mismatch_stops_retry_and_cannot_be_reported_as_bad_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config: dir.path().join("config.json"),
+            history: dir.path().join("history.json"),
+            logs: dir.path().join("logs"),
+        };
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let mut app = App::new(paths, tx, false);
+        app.sync_failure(SyncError::Remote(Error::Status(426)));
+        assert_eq!(app.state, "protocol_unsupported");
+        assert!(app.conflict);
+        assert!(app.needs_check);
+        use rustclipsync_core::direction::{DirectionErrorCode, SyncDirectionError};
+        for code in [
+            DirectionErrorCode::VersionStale,
+            DirectionErrorCode::SessionRevoked,
+        ] {
+            app.conflict = false;
+            app.sync_failure(SyncError::Remote(Error::Protocol(SyncDirectionError {
+                code,
+                version: Some(7),
+                minimum_protocol_version: None,
+            })));
+            assert_eq!(app.state, "direction_superseded");
+            assert!(
+                app.conflict,
+                "old direction sessions must not auto-reconnect after fencing"
+            );
+        }
+    }
+
     #[test]
     fn active_manual_pull_waits_for_the_clipboard_listener() {
         let dir = tempfile::tempdir().unwrap();

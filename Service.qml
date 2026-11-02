@@ -93,7 +93,8 @@ Item {
       if (method === "history") { history = result.entries || []; historyOffset = Number(result.offset || 0); historyTotal = Number(result.total || 0) }
       if (method === "clear_history") { history = []; historyOffset = 0; historyTotal = 0; request("history") }
       if (method === "set_config") { request("get_config"); request("history") }
-      if (method === "set_direction" || method === "cycle_direction") request("get_config")
+      if (method === "set_direction" || method === "cycle_direction" || method === "forget_pairing") request("get_config")
+      if (method === "forget_pairing") request("status")
       if (method === "cycle_direction") showDirectionOsd(result.direction, result.enabled)
     } else {
       errorCode = String(message.error || "unknown")
@@ -139,6 +140,7 @@ Item {
       root.showDirectionOsd("error", true)
       return "unavailable"
     }
+    function forgetPairingUnconfirmed(): string { return root.request("forget_pairing", {confirmRemoteRevocationUnconfirmed: true}) ? "queued; remote revocation UNCONFIRMED" : "unavailable" }
     function status(): string { return JSON.stringify(root.status) }
     function openHistory(): string {
       root.historyRequested()

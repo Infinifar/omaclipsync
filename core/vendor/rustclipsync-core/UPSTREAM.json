@@ -1,20 +1,22 @@
 {
   "source": "rustclipsync-core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "extracted_from": "Infinifar/omaclipsync@a8c330136886ad547dfadf386bb66901b3bbc45c",
   "files": {
-    "Cargo.toml": "4c1dec17781ca7f98eef328121002c371f0fc098a390292e2475b556e126eee8",
+    "Cargo.toml": "9dd4181b02f4aad95c9b33bfe6e02aa3afc57b84ef80bbe368f8cd17930247e0",
     "LICENSE": "e2a1c93da3bd7ecef573b225d7f159213fc89440b22487d1930b4c58a99bf84c",
-    "README.md": "1fec5f986099bc3d29a3671901e16c5fe561197d62b7ab6b2f640d264cbb64af",
-    "VALIDATION.md": "70a92667d4b3d67192d4702058e5333607891819c0d0c4bf8268f514542b527e",
+    "README.md": "8d50ea05c3f596d8207e67a39d52d0beb19bb426fa168190102e666f059ca4ca",
+    "VALIDATION.md": "1109ece493b8462bc34b76a22f3583001e61990cedfaa83d67c11c9d23014c11",
     "src/adapters.rs": "4c87eba6a900c9a9b2ab503190d9a4542d470bb3f1ddac951126c1f94315174f",
-    "src/client.rs": "099617683865afdae0ddbd2c08bf637b357581c00b32671ae883f0b374869f15",
-    "src/error.rs": "1b066be5b85f8d884b06e12ef0ac195fc7b52b93f6c9564f16d0b9aed63705da",
+    "src/client.rs": "04ef877bfb632f896a292b5ef369275a2ffb63be0ec3068b0889c80cac75c313",
+    "src/control.rs": "2aeb3f1e881eb5d7585d7eb13195c6a7cb40689f0c64c5ab3bf572a090690b8f",
+    "src/direction.rs": "c7fc33e31b926a739c5c9dfe3fbd9a5e022a6387822287234370b54964efd60e",
+    "src/error.rs": "43f77948b64dce26b648d504db731418624f7cfea395779baddf8d81ee602c6d",
     "src/filter.rs": "10444993546bc3164f2a103e7e4198b873c1363e7b19aba92aac518d531b7a16",
-    "src/lib.rs": "f5146a5e8321a6478252c6c474446889340221b321c68f025b12d37f3343399b",
-    "src/session.rs": "3d9ca7fc500af855fc7c5140bca4cef00b4152bfb1c10ed9ffe66b0e4c148627",
-    "src/state.rs": "0fb673c9ab87aa41c0ddd914ccb4f3ac2bcc076a6c8e832d339d635e0fe63251",
-    "src/transport.rs": "96a000f971442eeb38ce9b24517d7b91014b5c28afe00aa1b3402092126fb312",
-    "src/worker.rs": "20371d30e90b3c7f9c612b02b066c41728b12b3f1449ec5960d2b5f7beb2f4f9"
+    "src/lib.rs": "5ae509b679a39d3330e22617fe671927f35b7ca62926247aac1b1f1e85a4c4ed",
+    "src/session.rs": "767819ca52463611e2d91c2cc8b1f2c30a3aafee016bd04cf1801a17ccb8b3fc",
+    "src/state.rs": "753afe8f56e791ec8bba9f5469ba3aae57c4ca67dda73ddffe0317e2daa34e44",
+    "src/transport.rs": "bb14467a2df787850c4ea73efe431296f6c314fd233a0a70a0af369e23064807",
+    "src/worker.rs": "773e0d90ddb3b227aeb647c548cdb1dc3a8b3bbe68586c2d1ce90c6862ebc249"
   }
 }

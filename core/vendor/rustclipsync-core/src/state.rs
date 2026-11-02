@@ -99,7 +99,12 @@ impl State {
                     attempted: false,
                 })
             }
-            Some(p) if !p.attempted => p.copy = value,
+            Some(p) if !p.attempted => {
+                // This is a genuinely new copy created after the latest observed
+                // server revision, not a retry/rebase of the previous copy.
+                p.copy = value;
+                p.base_revision = self.cursor;
+            }
             Some(_) => {
                 self.queued = Some(value);
                 self.discard_pending = false;

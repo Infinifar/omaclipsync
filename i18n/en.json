@@ -108,5 +108,10 @@
   "inbox_delete": "Delete",
   "inbox_copied": "Copied to clipboard",
   "inbox_stale": "This item has changed or was deleted. Try again.",
-  "inbox_failed": "Operation failed. Check the background service and try again."
+  "inbox_failed": "Operation failed. Check the background service and try again.",
+  "protocol_unsupported": "Protocol version mismatch; update the client and server together",
+  "direction_unconfirmed": "Local direction saved; server confirmation pending. Reception stays blocked.",
+  "revocation_unconfirmed": "Revocation is unconfirmed. Existing pairing was retained; retry before changing accounts.",
+  "direction_blocked": "The chosen direction or pause state does not allow this operation.",
+  "direction_superseded": "Direction session was replaced or revoked. Select a direction explicitly or pair again."
 }

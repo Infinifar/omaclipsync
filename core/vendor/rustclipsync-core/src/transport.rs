@@ -1,6 +1,7 @@
 //! Transport boundary, implemented by the HTTPS client and deterministic tests.
 use crate::{
     client::{Client, Registration, RemoteState},
+    direction::SyncDirection,
     state::{Ack, Message, Outbox, Persisted},
     Error,
 };
@@ -9,12 +10,24 @@ use crate::{
 /// Implementations must bound network reads, writes and connection setup so the
 /// host can stop synchronization and recover from unavailable peers.
 pub trait Transport: Send + Sync {
+    /// Configure local direction and report it when the identity is paired.
+    fn set_sync_direction(
+        &self,
+        session: &Persisted,
+        direction: SyncDirection,
+        paused: bool,
+    ) -> Result<(), Error>;
+    /// Ensure configured direction is acknowledged before accessing metadata or content.
+    fn ensure_sync_direction(&self, session: &Persisted) -> Result<(), Error>;
+    /// Explicit logout; a transport failure means revocation is unconfirmed.
+    fn revoke_sync_direction(&self, session: &Persisted) -> Result<(), Error>;
     fn register(&self, session: &Persisted) -> Result<Registration, Error>;
     fn state(&self, session: &Persisted) -> Result<RemoteState, Error>;
     /// Wait for metadata changes, returning `None` when the long poll expires.
     /// Enforce and document a finite timeout for the entire request, including
-    /// reading its response. The built-in client uses 30 seconds. Worker shutdown
-    /// cannot interrupt this call and its join waits for it to return.
+    /// reading its response. The built-in client uses 30 seconds for the HTTP
+    /// poll, plus up to 40 seconds for discovery/control and one HTTP fallback.
+    /// Worker shutdown cannot interrupt this call and join waits for it to return.
     ///
     /// # Errors
     /// Returns a transport or protocol error if the request cannot complete.
@@ -26,6 +39,20 @@ pub trait Transport: Send + Sync {
 }
 
 impl Transport for Client {
+    fn ensure_sync_direction(&self, s: &Persisted) -> Result<(), Error> {
+        Client::ensure_sync_direction(self, s)
+    }
+    fn set_sync_direction(
+        &self,
+        s: &Persisted,
+        d: SyncDirection,
+        paused: bool,
+    ) -> Result<(), Error> {
+        Client::set_sync_direction(self, s, d, paused)
+    }
+    fn revoke_sync_direction(&self, s: &Persisted) -> Result<(), Error> {
+        Client::revoke_sync_direction(self, s)
+    }
     fn register(&self, s: &Persisted) -> Result<Registration, Error> {
         Client::register(self, s)
     }

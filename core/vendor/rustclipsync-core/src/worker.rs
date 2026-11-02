@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{state::Persisted, transport::Transport, Error};
+use crate::{direction::DirectionErrorCode, state::Persisted, transport::Transport, Error};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -63,6 +63,18 @@ impl Worker {
                         }
                         online = true;
                         delay = 1;
+                        if let Some(remote) = &result {
+                            if let Ok(mut value) = current.lock() {
+                                if value.state.epoch == snapshot.state.epoch
+                                    && value.state.device_id == snapshot.state.device_id
+                                {
+                                    // This is notification metadata only. A smaller
+                                    // authorized delivery must still be applied by
+                                    // the session before its durable cursor advances.
+                                    value.state.cursor = value.state.cursor.max(remote.revision);
+                                }
+                            }
+                        }
                         if result.is_some() {
                             let _ = events.try_send((generation, Event::Changed));
                             // Coalesce repeated notices while the main loop handles the revision.
@@ -82,7 +94,12 @@ impl Worker {
                             }
                         }
                     }
-                    Err(Error::Status(400 | 401 | 403 | 409)) => {
+                    Err(error)
+                        if matches!(
+                            error,
+                            Error::Status(400 | 401 | 403 | 409 | 426) | Error::DirectionRequired
+                        ) || matches!(&error,Error::Protocol(e) if matches!(e.code,DirectionErrorCode::Unauthenticated|DirectionErrorCode::DeviceMismatch|DirectionErrorCode::VersionStale|DirectionErrorCode::SessionRevoked|DirectionErrorCode::ProtocolUnsupported|DirectionErrorCode::DirectionForbidden)) =>
+                    {
                         // Wake the main loop to classify revocation or epoch mismatch.
                         // These are the last events: unlike recurring change notices,
                         // they must survive a full queue before the worker exits.
@@ -127,7 +144,15 @@ impl Worker {
 
     pub fn update(&self, state: &Persisted) {
         if let Ok(mut value) = self.state.lock() {
+            let observed = if value.state.epoch == state.state.epoch
+                && value.state.device_id == state.state.device_id
+            {
+                value.state.cursor.max(state.state.cursor)
+            } else {
+                state.state.cursor
+            };
             *value = state.notification_identity();
+            value.state.cursor = observed;
         }
     }
 

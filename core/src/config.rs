@@ -70,6 +70,14 @@ pub enum SyncDirection {
     Both,
 }
 impl SyncDirection {
+    pub fn server_direction(self) -> rustclipsync_core::direction::SyncDirection {
+        use rustclipsync_core::direction::SyncDirection;
+        match self {
+            Self::Push => SyncDirection::PushOnly,
+            Self::Receive => SyncDirection::ReceiveOnly,
+            Self::Both => SyncDirection::Bidirectional,
+        }
+    }
     pub fn can_push(self) -> bool {
         self != Self::Receive
     }

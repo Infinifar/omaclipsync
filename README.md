@@ -39,7 +39,7 @@ Only the current RustClipSync protocol is supported; there is no protocol select
 - **Real-time receive and event-driven push**: local copies use Wayland data-control events. HTTPS long polling signals remote changes, after which the client retrieves the latest value.
 - **Automatic recovery**: when the real-time connection is unavailable, the client falls back to polling every 60 seconds by default, configurable from 30 to 300 seconds. Reconnection uses backoff and checks the latest state immediately after reconnecting.
 - **Desktop integration**: bar status and controls for push, receive, and pause, with live English and Chinese translations.
-- **Sync direction**: choose push only, receive only, or two-way automatic sync (the default) in the main panel. Manual push and receive remain available in every mode; pause stops automatic sync.
+- **Sync direction**: choose push only, receive only, or two-way automatic sync (the default) in the main panel. Manual actions obey the chosen direction; pause blocks both sending and receiving.
 - **Optional local history**: off by default; browse, copy, paste, and favorite up to five entries. Favorites stay at the top and survive clearing ordinary history. Enabled history is stored as plaintext; system clipboard history can be used instead.
 - **Sync notifications**: enabled by default and configurable in Settings. Successful pushes and receives show a notification without revealing clipboard text; unchanged and failed operations do not.
 - **Sensitive clipboard policy and inbox**: marked sensitive content is blocked in both directions by default. When allowed, choose an encrypted inbox or automatic clipboard writing. The inbox keeps only its latest item, masks the preview, and offers reveal, receipt time, copy and delete. Ordinary history does not record marked sensitive text.
@@ -233,3 +233,23 @@ Artifacts are written to `dist/`; the integration tests use isolated local servi
 ## License
 
 [MIT](LICENSE). Rust dependency licenses and notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Native clipboard watching uses [wl-clipboard-rs](https://docs.rs/wl-clipboard-rs/0.9.5/wl_clipboard_rs/watch/index.html).
+
+## Direction reporting and compatibility
+
+This client requires protocol **3** (`X-RCS-Protocol: 3`) and matching server/client versions. Older clients must stay on their older server. Protocol mismatch stops sync with an upgrade message.
+
+Connection/reconnection first reports the latest direction and waits for ACK. Changes report immediately through the core WebSocket control channel, with authenticated HTTP fallback; local direction and sensitive filters remain in force. Unknown or unconfirmed direction never permits receiving. Pause retains the chosen direction and pairing, but blocks sending and receiving. Manual actions obey the same policy.
+
+A normal daemon/socket close is offline and retains eligibility for server backfill. Explicit re-pairing or changing the account/server first revokes the previous direction session; failure is shown as unconfirmed and retains the old identity. The server expires idle direction state after 30 days. On reconnect, it delivers at most the latest eligible per-device message after direction ACK. The reconnect window and its disable setting belong to the server administration page; no client backfill window is hardcoded. See the [direction protocol](https://github.com/Infinifar/rustclipsync-server/blob/main/docs/DIRECTION-PROTOCOL.md).
+
+### Migration from an older server
+
+Switch server and client versions together. When the old server cannot revoke a direction session, use its administrator or older client to revoke the old device token first. Only then explicitly discard this local pairing:
+
+```bash
+syncclipctl forget-pairing --confirm-remote-revocation-unconfirmed
+```
+
+This requires the running plugin and queues an explicitly confirmed local-only operation. Check status afterwards. It removes the local device token, pending outbox and sensitive inbox; history and key-store entries remain. It never claims the remote token was revoked; remote access may remain until the old administrator removes that token. Configure the new server and pair afterwards. A protocol mismatch is never accepted as successful revocation.
+
+HTTP fallback has a 30-second online lease, distinct from the admin activity badge. A zero server backfill window disables offline storage/replay but does not disable eligible online real-time delivery.

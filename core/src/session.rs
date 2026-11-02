@@ -178,7 +178,7 @@ mod tests {
         let path = dir.path().join("session.state");
         let clipboard = MemoryClipboard::default();
         let open = || {
-            Session(
+            let mut session = Session(
                 CoreSession::open(
                     SessionConfig {
                         server: "https://example.test".into(),
@@ -201,7 +201,14 @@ mod tests {
                     Arc::new(AtomicU64::new(0)),
                 )
                 .unwrap(),
-            )
+            );
+            session
+                .set_sync_direction(
+                    rustclipsync_core::direction::SyncDirection::Bidirectional,
+                    false,
+                )
+                .unwrap();
+            session
         };
         let mut session = open();
         let id = state::random_uuid().unwrap();

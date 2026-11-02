@@ -113,11 +113,12 @@ Ui.Panel {
     if (service && service.status && service.status.clipboardError === true) return strings.t("clipboard_error")
     if (syncState === "connected" && service && service.status.transport === "realtime") return strings.t("connected_realtime")
     if (syncState === "connected" && service && service.status.transport === "polling") return strings.t("connected_fallback")
-    var valid = ["connected", "connecting", "offline", "credentials", "needs_config", "config_error", "paused", "clipboard_error", "daemon_stopped", "starting", "conflict", "expired", "re_pair", "storage_error"]
+    var valid = ["connected", "connecting", "offline", "credentials", "needs_config", "config_error", "paused", "clipboard_error", "daemon_stopped", "starting", "conflict", "expired", "re_pair", "storage_error", "protocol_unsupported", "direction_unconfirmed", "revocation_unconfirmed", "direction_superseded", "direction_blocked"]
     return strings.t(valid.indexOf(syncState) >= 0 ? syncState : "starting")
   }
   function errorText(code) {
     if (code === "invalid_config" || code === "config_write_failed" || code === "invalid_filter") return strings.t("error_config")
+    if (["protocol_unsupported", "direction_unconfirmed", "revocation_unconfirmed", "direction_blocked", "direction_superseded"].indexOf(code) >= 0) return strings.t(code)
     if (code === "keyring_failed") return strings.t("error_keyring")
     if (code === "clipboard_unavailable") return strings.t("clipboard_error")
     if (code === "sensitive_blocked") return strings.t("sensitive_blocked")
@@ -152,8 +153,8 @@ Ui.Panel {
       }
       return
     }
-    if (actionIndex === 0) service.push()
-    else if (actionIndex === 1) service.pull(false)
+    if (actionIndex === 0 && syncEnabled && syncDirection !== "receive") service.push()
+    else if (actionIndex === 1 && syncEnabled && syncDirection !== "push") service.pull(false)
     else if (actionIndex === 2) service.toggleSync()
     else if (actionIndex === 3) setDirection("push")
     else if (actionIndex === 4) setDirection("receive")
@@ -171,7 +172,7 @@ Ui.Panel {
       if (!root.service.ready) { root.directionRequestId = 0; root.inboxActionRequestId = 0; root.hideInbox() }
     }
     function onConfigChanged() { root.hideInbox() }
-    function onStatusChanged() { if (["offline", "credentials", "re_pair", "daemon_stopped", "config_error"].indexOf(root.syncState) >= 0) root.hideInbox() }
+    function onStatusChanged() { if (["offline", "credentials", "re_pair", "daemon_stopped", "config_error", "protocol_unsupported", "direction_unconfirmed", "revocation_unconfirmed", "direction_superseded", "direction_blocked"].indexOf(root.syncState) >= 0) root.hideInbox() }
     function onReplied(id, method, ok, result, error) {
       if (method === "read_inbox" && id === root.inboxReadRequestId) {
         root.inboxReadRequestId = 0
@@ -373,8 +374,8 @@ Ui.Panel {
             }
             Row {
               width: parent.width; spacing: Style.space(4)
-              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("upload"); bordered: true; focusable: true; hasCursor: root.actionIndex === 0 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.push() }
-              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("download"); bordered: true; focusable: true; hasCursor: root.actionIndex === 1 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.pull(false) }
+              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("upload"); bordered: true; focusable: true; hasCursor: root.actionIndex === 0 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.syncEnabled && root.syncDirection !== "receive"; onClicked: root.service.push() }
+              Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t("download"); bordered: true; focusable: true; hasCursor: root.actionIndex === 1 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready && root.syncEnabled && root.syncDirection !== "push"; onClicked: root.service.pull(false) }
               Ui.Button { width: Math.max(0, (parent.width - 2 * parent.spacing) / 3); text: strings.t(root.syncEnabled ? "pause" : "resume"); bordered: true; focusable: true; hasCursor: root.actionIndex === 2 && keyCatcher.activeFocus; enabled: !!root.service && root.service.ready; onClicked: root.service.toggleSync() }
             }
             Text { textFormat: Text.PlainText; text: strings.t("sync_direction"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontTokens.bodySmall }

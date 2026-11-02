@@ -10,6 +10,8 @@ pub enum Error {
     InvalidProfile,
     HashMismatch,
     Filtered,
+    DirectionRequired,
+    Protocol(crate::direction::SyncDirectionError),
 }
 
 impl std::fmt::Display for Error {
@@ -24,6 +26,12 @@ impl std::fmt::Display for Error {
             Self::InvalidProfile => f.write_str("invalid protocol data"),
             Self::HashMismatch => f.write_str("content hash mismatch"),
             Self::Filtered => f.write_str("content rejected by the filter"),
+            Self::DirectionRequired => {
+                f.write_str("synchronization direction has not been configured")
+            }
+            Self::Protocol(error) => {
+                write!(f, "synchronization control rejected: {:?}", error.code)
+            }
         }
     }
 }
