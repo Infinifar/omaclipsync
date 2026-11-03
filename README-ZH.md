@@ -12,7 +12,7 @@
 
 Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使用 [RustClipSync 服务端](https://github.com/Infinifar/rustclipsync-server)的专用协议。同步核心由 Rust 编写，界面融入 Omarchy 顶栏。
 
-手机端可使用内置 RustClipSync 同步模块的 [Fcitx5 Android 输入法](https://github.com/Infinifar/fcitx5-android-bibi-keyboard)，配合该服务端与桌面插件同步。
+可通过[下方多平台客户端](#多平台客户端)与 Windows、Linux 和 Android 设备同步。
 
 当前实现的实际桌面资源占用尚需单独测量。
 
@@ -37,6 +37,25 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 
 本版本要求**协议 3**，配套**服务端 3.0.0**、独立桌面端 **0.5.0** 和共享 core **0.4.0**。移动端及 Fcitx 输入法单独发布，升级共享服务端前请确认它们的协议支持；旧客户端需使用服务端 2.0.0。
 
+## 多平台客户端
+
+以下客户端通过同一套自部署 RustClipSync 服务同步 UTF-8 文本，表中正式版本均支持**服务端 3.0.0／协议 3**：
+
+| 平台 | 客户端与下载 | 说明 |
+| --- | --- | --- |
+| Omarchy Quattro，x86_64 | [Omaclipsync 0.4.1](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.1) | 顶栏插件，需要 Wayland data-control 支持。 |
+| Windows 11，x64 | [RustClipSync Desktop 0.5.0](https://github.com/Infinifar/rustclipsync-desktop/releases/tag/v0.5.0) | WinUI 3 界面；目前 Windows 安装程序尚未签名。 |
+| Linux，x86_64 | [RustClipSync Desktop 0.5.0](https://github.com/Infinifar/rustclipsync-desktop/releases/tag/v0.5.0) | 提供 Debian 12、Ubuntu 24.04、Fedora 43 和 Arch 安装包；支持 X11，以及提供 data-control 的 Wayland。缺少该协议的 GNOME Wayland 不支持。 |
+| Android 12+，ARM64／x86_64 | [RustClipSync Mobile 0.2.0](https://github.com/Infinifar/rustclipsync-mobile/releases/tag/v0.2.0) | 独立应用，无需更换输入法。 |
+| Android，ARM64 | [Fcitx5 RustClipSync Keyboard 0.1.5](https://github.com/Infinifar/fcitx5-android-bibi-keyboard/releases/tag/0.1.5) | 输入法分支内置同步模块；上游 Fcitx5 安装包不包含该模块。 |
+| iPhone／iPad | [RustClipSync Mobile 项目](https://github.com/Infinifar/rustclipsync-mobile) | Swift／SwiftUI 客户端仍在开发，尚无 iOS 正式版本。 |
+
+各设备配置相同的 HTTPS 服务端基础地址与账户即可。地址末尾不要手动添加 `/api`，客户端会自行拼接接口路径。这些项目目前尚未提供 macOS 客户端正式版。
+
+同一台 Omarchy 电脑的剪贴板同步选择本插件或独立桌面端之一；同一台 Android 设备选择独立应用或输入法同步模块之一，避免多个客户端同时写入剪贴板。
+
+独立 Android 应用在前台手动推送；自动接收需要开启后台运行。后台捕获新的复制内容还需 Shizuku 13+，并通过无线调试／ADB shell 模式启动；接收无需 Shizuku。Android 及厂商的后台限制仍然适用，详见[移动端使用说明](https://github.com/Infinifar/rustclipsync-mobile#connect-and-sync)。
+
 ## 特点
 
 - **实时接收，事件驱动推送**：本机复制由 Wayland data-control 事件触发；远端变化通过 HTTPS 长轮询通知，随后读取最新内容。
@@ -56,10 +75,10 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 
 ## 使用前须知与限制
 
-- 需要自行部署 [RustClipSync 服务端](https://github.com/Infinifar/rustclipsync-server)。插件不包含服务端；手机端使用 [Fcitx5 Android 输入法](https://github.com/Infinifar/fcitx5-android-bibi-keyboard)。
+- 需要自行部署 [RustClipSync 服务端](https://github.com/Infinifar/rustclipsync-server)。插件不包含服务端；其他设备可按[多平台客户端表格](#多平台客户端)选择客户端。
 - **仅同步 UTF-8 文本**，不支持同步图片或文件。Omarchy 默认提供的 [LocalSend](https://localsend.org/) 已经可用于手动在设备间传输图片和文件。
 - 暂不支持多账户和 WebDAV；一次只配置一个服务端账户。
-- 需要 Linux、Omarchy Quattro / Quickshell 和支持 data-control 协议的 Wayland 合成器。当前预编译包仅支持 **x86_64**；不支持 X11/XWayland、Windows 或 macOS。
+- 本插件需要 Linux、Omarchy Quattro / Quickshell 和支持 data-control 协议的 Wayland 合成器。当前预编译包仅支持 **x86_64**；不支持 X11/XWayland、Windows 或 macOS。
 - 多屏、长期稳定性及所有桌面环境尚未完整验收。请参阅 [验收记录](ACCEPTANCE.md)。
 
 ## 安装

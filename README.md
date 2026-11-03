@@ -12,7 +12,7 @@ English · [简体中文](README-ZH.md)
 
 Omaclipsync is a lightweight text clipboard client plugin for Omarchy Quattro, using the dedicated [RustClipSync server](https://github.com/Infinifar/rustclipsync-server) protocol. Its synchronization core is written in Rust and its interface lives in the Omarchy bar.
 
-For Android, use the [Fcitx5 Android input method](https://github.com/Infinifar/fcitx5-android-bibi-keyboard) with its built-in RustClipSync synchronization module.
+Use the [platform clients below](#clients-for-other-platforms) to synchronize with Windows, Linux and Android devices.
 
 Desktop resource usage for the current implementation still needs separate measurement.
 
@@ -37,6 +37,25 @@ Only the current RustClipSync protocol is supported; there is no protocol select
 
 This release requires **wire protocol 3** and **RustClipSync Server 3.0.0**; matching standalone Desktop is **0.5.0** and shared core is **0.4.0**. Mobile apps and Fcitx input methods are released separately; check their protocol support before upgrading a shared server. Older clients need server 2.0.0.
 
+## Clients for other platforms
+
+These clients synchronize UTF-8 text through the same self-hosted RustClipSync server. The following released versions support **Server 3.0.0 / protocol 3**:
+
+| Platform | Client and download | Notes |
+| --- | --- | --- |
+| Omarchy Quattro, x86_64 | [Omaclipsync 0.4.1](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.1) | Bar plugin; requires Wayland data-control support. |
+| Windows 11, x64 | [RustClipSync Desktop 0.5.0](https://github.com/Infinifar/rustclipsync-desktop/releases/tag/v0.5.0) | WinUI 3 interface; Windows installer is currently unsigned. |
+| Linux, x86_64 | [RustClipSync Desktop 0.5.0](https://github.com/Infinifar/rustclipsync-desktop/releases/tag/v0.5.0) | Packages for Debian 12, Ubuntu 24.04, Fedora 43 and Arch. Supports X11 and Wayland with data-control; GNOME Wayland without that protocol is unsupported. |
+| Android 12+, ARM64 / x86_64 | [RustClipSync Mobile 0.2.0](https://github.com/Infinifar/rustclipsync-mobile/releases/tag/v0.2.0) | Standalone app; no keyboard replacement required. |
+| Android, ARM64 | [Fcitx5 RustClipSync Keyboard 0.1.5](https://github.com/Infinifar/fcitx5-android-bibi-keyboard/releases/tag/0.1.5) | Synchronization built into this input-method fork. Upstream Fcitx5 builds do not include this module. |
+| iPhone / iPad | [RustClipSync Mobile project](https://github.com/Infinifar/rustclipsync-mobile) | Swift/SwiftUI client in development; no iOS release is available yet. |
+
+Configure each device with the same HTTPS server base URL and account. Enter the base URL without appending `/api`; the clients construct API paths themselves. These projects do not currently provide a macOS client release.
+
+On an Omarchy machine, choose either this plugin or the standalone desktop client for clipboard synchronization. On Android, enable either the standalone app or the keyboard's sync module to avoid competing clipboard writers.
+
+The standalone Android app sends manually in the foreground. Automatic receiving requires its background-operation setting; capturing new copies in the background additionally requires Shizuku 13+ running in wireless-debugging / ADB shell mode. Receiving does not require Shizuku. Android/OEM background limits still apply; see the [mobile setup guide](https://github.com/Infinifar/rustclipsync-mobile#connect-and-sync).
+
 ## Features
 
 - **Real-time receive and event-driven push**: local copies use Wayland data-control events. HTTPS long polling signals remote changes, after which the client retrieves the latest value.
@@ -52,10 +71,10 @@ If notifications do not appear, check Omarchy's Do Not Disturb mode with `omarch
 
 ## Requirements and limitations
 
-- Deploy a [RustClipSync server](https://github.com/Infinifar/rustclipsync-server). This plugin does not include a server. The Android client is the [Fcitx5 Android input method](https://github.com/Infinifar/fcitx5-android-bibi-keyboard).
+- Deploy a [RustClipSync server](https://github.com/Infinifar/rustclipsync-server). This plugin does not include a server. Choose companion clients from the [platform table](#clients-for-other-platforms).
 - **UTF-8 text only**: image and file synchronization are not supported. [LocalSend](https://localsend.org/), included in standard Omarchy installations, can already transfer images and files manually between devices.
 - Multiple accounts and WebDAV are not currently supported; configure one server account at a time.
-- Requires Linux, Omarchy Quattro / Quickshell, and a Wayland compositor with data-control support. The bundled binaries target **x86_64** only. X11/XWayland, Windows, and macOS are not supported.
+- This plugin requires Linux, Omarchy Quattro / Quickshell, and a Wayland compositor with data-control support. The bundled binaries target **x86_64** only. X11/XWayland, Windows, and macOS are not supported.
 - Multi-monitor behavior, long-term stability, and all desktop environments have not been fully validated. See [acceptance notes](ACCEPTANCE.md).
 
 ## Install
