@@ -1,6 +1,6 @@
 # Omaclipsync
 
-当前版本 **0.4.0**，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.0)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
+当前版本 **0.4.1**，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.1)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
 
 构建来源：发布 CI 在摘要固定的容器中从源码重建两个可执行文件，逐字节比较通过后才打包。参见[复现构建说明](REPRODUCIBLE-BUILD.md)及[原生代码审核索引](NATIVE-REVIEW.md)。这不等于市场安全审核通过。
 
@@ -49,6 +49,10 @@ Omaclipsync 是 Omarchy Quattro 的轻量级文本剪贴板客户端插件，使
 - **过滤与去重**：支持正则黑名单、白名单和可选的接收过滤；按消息 ID 与每台设备的持久游标避免重试和通知造成重复写入。相同文本的不同复制事件仍可同步。
 
 如果通知没有弹出，可以运行 `omarchy shell notifications isDnd` 检查 Omarchy 的勿扰模式。在 Omarchy 4.5.0 RC 中，开启勿扰时通知会保留在通知历史中，但不会弹窗。可在 Omarchy 中关闭勿扰，或运行 `omarchy shell notifications setDnd off` 恢复弹窗。
+
+## 保存策略后的存储错误恢复
+
+暂停或切换方向已保存，但加密状态清理失败时，界面保留已保存的选择，同步保持阻断；旧会话不能继续上传或重启监听。插件每 30 秒重新读取已保存配置并重试清理，清理成功前不能用“恢复同步”覆盖原限制。修复本机存储或权限问题后等待重试，或重新保存设置触发重试。失败会明确提示，不会显示切换成功；不会重置配对、历史或收件区。
 
 ## 使用前须知与限制
 

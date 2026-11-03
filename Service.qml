@@ -98,6 +98,10 @@ Item {
       if (method === "cycle_direction") showDirectionOsd(result.direction, result.enabled)
     } else {
       errorCode = String(message.error || "unknown")
+      if (method === "set_config" || method === "toggle" || method === "set_direction" || method === "cycle_direction" || method === "set_password") {
+        // A durable selection can be saved even when its application is blocked.
+        request("status"); request("get_config")
+      }
       if (method === "cycle_direction") showDirectionOsd("error", true)
     }
     replied(message.id, method, message.ok === true, result, String(message.error || ""))

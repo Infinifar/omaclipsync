@@ -109,6 +109,7 @@ Ui.Panel {
     directionRequestId = service.setDirection(direction) || 0
   }
   function stateText() {
+    if (service && service.status.configApplyPending === true) return strings.t("config_apply_pending")
     if (service && service.busy) return strings.t("syncing")
     if (service && service.status && service.status.clipboardError === true) return strings.t("clipboard_error")
     if (syncState === "connected" && service && service.status.transport === "realtime") return strings.t("connected_realtime")
@@ -117,6 +118,7 @@ Ui.Panel {
     return strings.t(valid.indexOf(syncState) >= 0 ? syncState : "starting")
   }
   function errorText(code) {
+    if (code === "config_apply_pending") return strings.t("config_apply_pending")
     if (code === "invalid_config" || code === "config_write_failed" || code === "invalid_filter") return strings.t("error_config")
     if (["protocol_unsupported", "direction_unconfirmed", "revocation_unconfirmed", "direction_blocked", "direction_superseded"].indexOf(code) >= 0) return strings.t(code)
     if (code === "keyring_failed") return strings.t("error_keyring")
@@ -172,7 +174,7 @@ Ui.Panel {
       if (!root.service.ready) { root.directionRequestId = 0; root.inboxActionRequestId = 0; root.hideInbox() }
     }
     function onConfigChanged() { root.hideInbox() }
-    function onStatusChanged() { if (["offline", "credentials", "re_pair", "daemon_stopped", "config_error", "protocol_unsupported", "direction_unconfirmed", "revocation_unconfirmed", "direction_superseded", "direction_blocked"].indexOf(root.syncState) >= 0) root.hideInbox() }
+    function onStatusChanged() { if (root.service.status.configApplyPending === true || ["offline", "credentials", "re_pair", "daemon_stopped", "config_error", "storage_error", "protocol_unsupported", "direction_unconfirmed", "revocation_unconfirmed", "direction_superseded", "direction_blocked"].indexOf(root.syncState) >= 0) root.hideInbox() }
     function onReplied(id, method, ok, result, error) {
       if (method === "read_inbox" && id === root.inboxReadRequestId) {
         root.inboxReadRequestId = 0

@@ -13,6 +13,7 @@
   "repair_confirm": "Confirm pairing",
   "repair_warning": "Pairing again discards unsent local sync data and registers a new device.",
   "storage_error": "Encrypted sync state is unavailable; synchronization is paused",
+  "config_apply_pending": "Settings are saved; synchronization is safely blocked until state recovery completes.",
   "credentials": "Check credentials or unlock the keyring",
   "needs_config": "Set up your server",
   "config_error": "Invalid configuration",

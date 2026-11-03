@@ -23,6 +23,11 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || github.sha }}
           persist-credentials: false
+      - name: Check settings, inbox and configuration-error replies
+        run: |
+          node tests/settings.test.js
+          node tests/inbox.test.js
+          node tests/service.test.js
       - name: Rebuild both executables and compare against the committed bytes
         if: env.BRANCH_TEST != 'true'
         shell: bash

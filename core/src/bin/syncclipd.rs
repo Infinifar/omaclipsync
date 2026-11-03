@@ -27,6 +27,14 @@ use std::{
 use wl_clipboard_rs::watch::CancelHandle;
 
 const ID: &str = "omaclipsync";
+// Retry local application separately from the one-second configuration-file check.
+const CONFIG_APPLY_RETRY: Duration = Duration::from_secs(30);
+type LiveSession = session::Session<session::WaylandClipboard>;
+enum ConfigApplication {
+    Applied,
+    // A failed cleanup retains its key/state only here, never in the live sync path.
+    Blocked(Option<Box<LiveSession>>),
+}
 enum WatchCancel {
     Native(CancelHandle),
 }
@@ -73,7 +81,9 @@ impl Paths {
 struct App {
     paths: Paths,
     config: Config,
-    session: Option<session::Session<session::WaylandClipboard>>,
+    session: Option<LiveSession>,
+    application: ConfigApplication,
+    next_apply_retry: Instant,
     worker: Option<worker::Worker>,
     conflict: bool,
     clipboard_latest: Arc<Mutex<Option<(u64, u64, wayland::ClipboardChange)>>>,
@@ -116,6 +126,8 @@ impl App {
             paths,
             config: Config::default(),
             session: None,
+            application: ConfigApplication::Applied,
+            next_apply_retry: now,
             worker: None,
             conflict: false,
             clipboard_latest: Arc::new(Mutex::new(None)),
@@ -150,7 +162,7 @@ impl App {
             config_revision: 0,
         };
         app.log(Event::Started);
-        app.reload();
+        let _ = app.reload();
         app
     }
     fn log(&mut self, event: Event) {
@@ -160,8 +172,10 @@ impl App {
         let m = fs::metadata(&self.paths.config).ok()?;
         Some((m.modified().ok()?, m.len()))
     }
-    fn reload(&mut self) {
+    fn reload(&mut self) -> Result<(), &'static str> {
+        // This is an observed file version, not proof that its policy was applied.
         self.config_stamp = self.stamp();
+        self.next_apply_retry = Instant::now() + CONFIG_APPLY_RETRY;
         let config = match Config::read(&self.paths.config) {
             Ok(c) => c,
             Err(ConfigError::Io(e)) if e.kind() == io::ErrorKind::NotFound => Config::default(),
@@ -171,54 +185,66 @@ impl App {
                 self.state = "config_error";
                 self.log(Event::ConfigError);
                 self.stop_watcher();
-                return;
+                return Err("invalid_config");
             }
         };
-        self.apply(config);
+        self.apply(config)
     }
-    fn apply(&mut self, config: Config) {
-        if (config.sync.direction != self.config.sync.direction
-            || config.sync.enabled != self.config.sync.enabled)
-            && self.session.is_some()
-            && self.session.as_mut().unwrap().record_clear().is_err()
-        {
-            self.state = "storage_error";
-            self.stop_notifications();
-            self.stop_watcher();
-            return;
-        }
+    fn config_apply_pending(&self) -> bool {
+        matches!(self.application, ConfigApplication::Blocked(_))
+    }
+    fn block_application(&mut self, session: Option<LiveSession>) -> &'static str {
+        self.session = None;
+        self.application = ConfigApplication::Blocked(session.map(Box::new));
+        self.state = "storage_error";
+        self.next_apply_retry = Instant::now() + CONFIG_APPLY_RETRY;
         self.stop_notifications();
         self.stop_watcher();
-        self.session = None;
+        "config_apply_pending"
+    }
+    fn apply(&mut self, config: Config) -> Result<(), &'static str> {
+        let policy_changed = config.sync.direction != self.config.sync.direction
+            || config.sync.enabled != self.config.sync.enabled;
+        // Invalidate buffered and in-flight callbacks before any fallible cleanup.
+        self.stop_notifications();
+        self.stop_watcher();
+        let previous = self.session.take();
+        let deferred = match std::mem::replace(&mut self.application, ConfigApplication::Applied) {
+            ConfigApplication::Blocked(session) => session,
+            ConfigApplication::Applied => None,
+        };
+        let cleanup = deferred.or_else(|| previous.filter(|_| policy_changed).map(Box::new));
         self.conflict = false;
-        // A watcher captures this policy at startup. Cancel it and discard
-        // queued clipboard data before adopting a changed sensitive policy.
-        if self.config.sync.allow_sensitive != config.sync.allow_sensitive {
-            self.stop_watcher();
+        if self.config != config || self.config_revision == 0 {
+            self.config_revision = self.config_revision.wrapping_add(1);
         }
-        let filter = match config.validate() {
+        self.config = config;
+        if let Some(mut session) = cleanup {
+            if session.record_clear().is_err() {
+                return Err(self.block_application(Some(*session)));
+            }
+        }
+        let filter = match self.config.validate() {
             Ok(f) => f,
             Err(_) => {
                 self.state = "config_error";
                 self.stop_watcher();
-                return;
+                return Err("invalid_config");
             }
         };
         let history = match History::new(
             &self.paths.history,
-            config.history.enabled,
-            config.history.limit,
+            self.config.history.enabled,
+            self.config.history.limit,
         ) {
             Ok(h) => h,
             Err(_) => {
                 self.state = "config_error";
                 self.stop_watcher();
-                return;
+                return Err("config_error");
             }
         };
-        let ready = !config.server.url.is_empty() && !config.server.user.is_empty();
-        self.config = config;
-        self.config_revision = self.config_revision.wrapping_add(1);
+        let ready = !self.config.server.url.is_empty() && !self.config.server.user.is_empty();
         self.logger.set_level(if self.verbose {
             Level::Debug
         } else {
@@ -227,17 +253,17 @@ impl App {
         if !ready {
             self.state = "needs_config";
             self.stop_watcher();
-            return;
+            return Ok(());
         }
         let password = match keyring::lookup(&self.config.server.user) {
             Ok(v) => v,
             Err(_) => {
                 self.state = "credentials";
                 self.stop_watcher();
-                return;
+                return Ok(());
             }
         };
-        match session::Session::open(
+        let session = match session::Session::open(
             &self.config.server.url,
             &self.config.server.user,
             password,
@@ -249,19 +275,22 @@ impl App {
             history,
             Arc::clone(&self.clipboard_serial),
         ) {
-            Ok(mut session) => {
-                session.use_sensitive_inbox(!self.config.sync.auto_apply_sensitive);
-                self.session = Some(session);
-            }
+            Ok(session) => session,
             Err(SyncError::Credentials) => {
                 self.state = "credentials";
-                return;
+                return Ok(());
             }
+            Err(SyncError::Storage(_)) => return Err(self.block_application(None)),
             Err(_) => {
                 self.state = "config_error";
-                return;
+                return Err("config_error");
             }
-        }
+        };
+        self.activate_session(session)
+    }
+    fn activate_session(&mut self, mut session: LiveSession) -> Result<(), &'static str> {
+        session.use_sensitive_inbox(!self.config.sync.auto_apply_sensitive);
+        self.session = Some(session);
         let direction = self.config.sync.direction.server_direction();
         if let Some(session) = self.session.as_mut() {
             let result = session
@@ -279,12 +308,16 @@ impl App {
                     }
                 });
             if let Err(error) = result {
+                if matches!(error, SyncError::Storage(_)) {
+                    let session = self.session.take();
+                    return Err(self.block_application(session));
+                }
                 self.needs_check = true;
                 self.sync_failure(error);
                 if self.state == "offline" {
                     self.state = "direction_unconfirmed";
                 }
-                return;
+                return Ok(());
             }
         }
         self.state = if self.config.sync.enabled {
@@ -302,6 +335,7 @@ impl App {
         if !self.config.sync.enabled {
             self.stop_watcher();
         }
+        Ok(())
     }
     fn stop_notifications(&mut self) {
         self.notification_generation = self.notification_generation.wrapping_add(1);
@@ -359,7 +393,7 @@ impl App {
         }
     }
     fn wants_watcher(&self) -> bool {
-        self.config.sync.enabled && self.session.is_some()
+        !self.config_apply_pending() && self.config.sync.enabled && self.session.is_some()
     }
     fn watcher_ready(&mut self, now: Instant) {
         self.clipboard_error = false;
@@ -461,7 +495,7 @@ impl App {
         } else {
             "polling"
         };
-        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"deviceId":self.session.as_ref().map(|s| &s.persisted.state.device_id),"inbox":inbox::metadata(self.session.as_ref().and_then(|s| s.persisted.inbox.as_ref())),"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision})
+        json!({"state":self.state,"transport":transport,"enabled":self.config.sync.enabled,"direction":self.config.sync.direction,"url":self.config.server.url,"deviceId":self.session.as_ref().map(|s| &s.persisted.state.device_id),"inbox":inbox::metadata(self.session.as_ref().and_then(|s| s.persisted.inbox.as_ref())),"lastSync":self.last_sync,"historyError":self.session.as_ref().is_some_and(|s|s.history_error),"logError":self.log_error,"watching":self.watcher_cancel.is_some(),"clipboardError":self.clipboard_error,"dedupeFull":self.dedupe_full,"configRevision":self.config_revision,"configApplyPending":self.config_apply_pending()})
     }
     fn stamp_sync(&mut self) {
         self.last_sync = Some(
@@ -498,8 +532,10 @@ impl App {
         let now = Instant::now();
         if now >= self.next_config_check {
             self.next_config_check = now + Duration::from_secs(1);
-            if self.stamp() != self.config_stamp {
-                self.reload();
+            if self.stamp() != self.config_stamp
+                || (self.config_apply_pending() && now >= self.next_apply_retry)
+            {
+                let _ = self.reload();
             }
         }
         self.notification_events(now);
@@ -582,6 +618,9 @@ impl App {
     }
 
     fn tick_sync(&mut self, out: &mut impl Write, now: Instant) {
+        if self.config_apply_pending() {
+            return;
+        }
         if !self.config.sync.enabled
             && self.session.is_some()
             && now >= self.next_poll
@@ -785,6 +824,21 @@ impl App {
     }
     fn handle(&mut self, request: Request) -> (u64, Result<Value, &'static str>, bool) {
         let id = request.id;
+        if self.config_apply_pending() {
+            match request.method.as_str() {
+                "push" | "pull" | "pull_force" | "re_pair" => {
+                    return (id, Err("config_apply_pending"), false);
+                }
+                // Do not overwrite a saved restriction with a resume while its
+                // old outbox cleanup is still unconfirmed, including after restart.
+                "set_config" | "toggle" | "set_direction" | "cycle_direction"
+                    if self.apply(self.config.clone()).is_err() =>
+                {
+                    return (id, Err("config_apply_pending"), false);
+                }
+                _ => {}
+            }
+        }
         let result = match request.method.as_str() {
             "hello" => Ok(protocol::hello()),
             "status" => Ok(self.status()),
@@ -811,8 +865,7 @@ impl App {
                         match config.write(&self.paths.config) {
                             Ok(()) => {
                                 self.config_stamp = self.stamp();
-                                self.apply(config);
-                                Ok(self.status())
+                                self.apply(config).map(|()| self.status())
                             }
                             Err(_) => Err("config_write_failed"),
                         }
@@ -883,10 +936,7 @@ impl App {
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 match keyring::store(account, password) {
-                    Ok(()) => {
-                        self.reload();
-                        Ok(self.status())
-                    }
+                    Ok(()) => self.reload().map(|()| self.status()),
                     Err(_) => Err("keyring_failed"),
                 }
             }
@@ -896,8 +946,7 @@ impl App {
                 match config.write(&self.paths.config) {
                     Ok(()) => {
                         self.config_stamp = self.stamp();
-                        self.apply(config);
-                        Ok(self.status())
+                        self.apply(config).map(|()| self.status())
                     }
                     Err(_) => Err("config_write_failed"),
                 }
@@ -925,8 +974,7 @@ impl App {
                         match config.write(&self.paths.config) {
                             Ok(()) => {
                                 self.config_stamp = self.stamp();
-                                self.apply(config);
-                                Ok(self.status())
+                                self.apply(config).map(|()| self.status())
                             }
                             Err(_) => Err("config_write_failed"),
                         }
@@ -1130,6 +1178,7 @@ impl App {
                     self.stop_watcher();
                     self.clipboard_serial.fetch_add(1, Ordering::SeqCst);
                     self.session = None;
+                    self.application = ConfigApplication::Applied;
                     let identity = omaclipsync_core::hash(&format!(
                         "{}\0{}",
                         self.config.server.url, self.config.server.user
@@ -1383,7 +1432,7 @@ mod tests {
         let old_generation = app.watcher_generation;
         let mut config = app.config.clone();
         config.sync.allow_sensitive = false;
-        app.apply(config);
+        app.apply(config).unwrap();
         assert!(app.clipboard_latest.lock().unwrap().is_none());
         assert_ne!(app.watcher_generation, old_generation);
         assert!(!app.config.sync.allow_sensitive);
@@ -1425,6 +1474,259 @@ mod tests {
             );
             assert!(!result["enabled"].as_bool().unwrap());
         }
+    }
+
+    fn running_app(dir: &std::path::Path, direction: SyncDirection) -> App {
+        let paths = Paths {
+            config: dir.join("config.json"),
+            history: dir.join("history.json"),
+            logs: dir.join("logs"),
+        };
+        let (tx, _rx) = mpsc::sync_channel(4);
+        let mut app = App::new(paths, tx, false);
+        app.config.sync.direction = direction;
+        app.config.write(&app.paths.config).unwrap();
+        let mut session = fixture_session(
+            dir,
+            History::new(dir.join("history.json"), false, 10).unwrap(),
+        );
+        session
+            .set_sync_direction(direction.server_direction(), false)
+            .unwrap();
+        session
+            .record_local("synthetic pending copy", None, false, Instant::now())
+            .unwrap();
+        assert!(session.has_pending());
+        // Restore an already-paired fixture without contacting a real server.
+        session.persisted.paired = true;
+        session.persisted.state.epoch = rustclipsync_core::state::random_uuid().unwrap();
+        omaclipsync_core::state::save(&dir.join("state"), &[7; 32], &session.persisted).unwrap();
+        app.session = Some(session);
+        app.state = "connected";
+        app
+    }
+
+    fn block_state_replacement(dir: &std::path::Path) {
+        // A directory at the replacement destination fails even when tests run as root.
+        fs::rename(dir.join("state"), dir.join("state.saved")).unwrap();
+        fs::create_dir(dir.join("state")).unwrap();
+    }
+
+    fn restore_state_replacement(dir: &std::path::Path) {
+        fs::remove_dir(dir.join("state")).unwrap();
+        fs::rename(dir.join("state.saved"), dir.join("state")).unwrap();
+    }
+
+    #[test]
+    fn saved_restrictions_survive_state_failure_and_storage_recovery() {
+        for (method, initial) in [
+            ("toggle", SyncDirection::Both),
+            ("set_direction", SyncDirection::Both),
+            ("cycle_direction", SyncDirection::Push),
+            ("set_config", SyncDirection::Both),
+            ("reload", SyncDirection::Both),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut app = running_app(dir.path(), initial);
+            let old_generation = app.watcher_generation;
+            block_state_replacement(dir.path());
+            let mut requested = app.config.clone();
+            if matches!(method, "toggle" | "reload") {
+                requested.sync.enabled = false;
+            } else {
+                requested.sync.direction = SyncDirection::Receive;
+            }
+            let result = if method == "reload" {
+                requested.write(&app.paths.config).unwrap();
+                let _ = app.reload();
+                None
+            } else {
+                let params = match method {
+                    "set_config" => json!({"config":requested}),
+                    "set_direction" => json!({"direction":"receive"}),
+                    _ => json!({}),
+                };
+                let request = Request::parse(
+                    &serde_json::to_vec(&json!({"id":1,"method":method,"params":params})).unwrap(),
+                )
+                .unwrap();
+                Some(app.handle(request).1)
+            };
+            assert_eq!(
+                Config::read(&app.paths.config).unwrap(),
+                requested,
+                "{method}: saved config"
+            );
+            assert_eq!(app.config, requested, "{method}: saved restrictions must replace the old runtime config even if state saving fails");
+            if let Some(result) = result {
+                assert_eq!(
+                    result.unwrap_err(),
+                    "config_apply_pending",
+                    "{method}: no false success"
+                );
+            }
+            assert_eq!(app.state, "storage_error", "{method}");
+            assert!(
+                app.session.is_none(),
+                "{method}: old session must be quarantined"
+            );
+            assert!(!app.wants_watcher(), "{method}: listener cannot restart");
+
+            restore_state_replacement(dir.path());
+            *app.clipboard_latest.lock().unwrap() = Some((
+                old_generation,
+                app.clipboard_serial.fetch_add(1, Ordering::SeqCst) + 1,
+                wayland::ClipboardChange::Text {
+                    text: "synthetic fresh copy after storage recovery".into(),
+                    origin: None,
+                    sensitive: false,
+                },
+            ));
+            app.tick_sync(&mut Vec::new(), Instant::now());
+            assert!(
+                app.session.is_none(),
+                "{method}: fresh copy cannot revive old session"
+            );
+            assert!(!app.wants_watcher(), "{method}");
+            for action in ["push", "pull", "pull_force", "re_pair"] {
+                let request = Request::parse(
+                    &serde_json::to_vec(&json!({"id":2,"method":action,"params":{"confirm":true}}))
+                        .unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    app.handle(request).1.unwrap_err(),
+                    "config_apply_pending",
+                    "{method}/{action}"
+                );
+            }
+            // Re-read the saved selection. The fixture has no credentials/profile,
+            // so successful cleanup stops at needs_config without network or Wayland.
+            let _ = app.reload();
+            assert_eq!(
+                app.config, requested,
+                "{method}: recovery must retain saved policy"
+            );
+            assert_eq!(app.state, "needs_config", "{method}: cleanup can recover");
+            assert!(app.clipboard_latest.lock().unwrap().is_none());
+            let persisted =
+                omaclipsync_core::state::load(&dir.path().join("state"), &[7; 32]).unwrap();
+            assert!(
+                persisted.state.pending.is_none(),
+                "{method}: discarded outbox must be durable"
+            );
+            assert!(persisted.state.queued.is_none(), "{method}");
+        }
+    }
+
+    #[test]
+    fn pending_apply_retries_the_saved_config_without_a_file_change_and_blocks_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = running_app(dir.path(), SyncDirection::Both);
+        block_state_replacement(dir.path());
+        let toggle = || Request::parse(br#"{"id":1,"method":"toggle"}"#).unwrap();
+        assert_eq!(app.handle(toggle()).1.unwrap_err(), "config_apply_pending");
+        let saved = Config::read(&app.paths.config).unwrap();
+        let revision = app.config_revision;
+        assert!(!saved.sync.enabled);
+        assert_eq!(app.handle(toggle()).1.unwrap_err(), "config_apply_pending");
+        assert_eq!(
+            Config::read(&app.paths.config).unwrap(),
+            saved,
+            "failed cleanup cannot overwrite the saved pause with a resume"
+        );
+        restore_state_replacement(dir.path());
+        app.next_apply_retry = Instant::now() + CONFIG_APPLY_RETRY;
+        app.next_config_check = Instant::now();
+        app.tick(&mut Vec::new());
+        assert!(
+            app.config_apply_pending(),
+            "storage recovery alone must not restore a live old session"
+        );
+        app.next_apply_retry = Instant::now();
+        app.next_config_check = Instant::now();
+        app.tick(&mut Vec::new());
+        assert!(!app.config_apply_pending());
+        assert_eq!(app.config, saved);
+        assert_eq!(
+            app.config_revision, revision,
+            "retries do not synthesize configuration changes"
+        );
+    }
+
+    #[test]
+    fn restarted_restriction_quarantines_a_session_if_its_state_save_fails() {
+        for (enabled, direction) in [(false, SyncDirection::Both), (true, SyncDirection::Receive)] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut old = running_app(dir.path(), SyncDirection::Both);
+            let device = old
+                .session
+                .as_ref()
+                .unwrap()
+                .persisted
+                .state
+                .device_id
+                .clone();
+            let mut saved = old.config.clone();
+            saved.sync.enabled = enabled;
+            saved.sync.direction = direction;
+            saved.write(&old.paths.config).unwrap();
+            drop(old.session.take());
+            let (tx, _rx) = mpsc::sync_channel(4);
+            let mut restarted = App::new(old.paths, tx, false);
+            assert_eq!(restarted.config, saved);
+            let reopened = fixture_session(
+                dir.path(),
+                History::new(dir.path().join("history.json"), false, 10).unwrap(),
+            );
+            assert_eq!(reopened.persisted.state.device_id, device);
+            block_state_replacement(dir.path());
+            assert_eq!(
+                restarted.activate_session(reopened).unwrap_err(),
+                "config_apply_pending"
+            );
+            assert!(restarted.session.is_none());
+            assert!(!restarted.wants_watcher());
+            restore_state_replacement(dir.path());
+            restarted.reload().unwrap();
+            assert_eq!(restarted.config, saved);
+            let persisted =
+                omaclipsync_core::state::load(&dir.path().join("state"), &[7; 32]).unwrap();
+            assert_eq!(persisted.state.device_id, device);
+            assert!(persisted.state.pending.is_none());
+        }
+    }
+
+    #[test]
+    fn recovery_retains_durable_cancellation_for_an_uncertain_upload() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = running_app(dir.path(), SyncDirection::Both);
+        let session = app.session.as_mut().unwrap();
+        session.persisted.state.pending.as_mut().unwrap().attempted = true;
+        omaclipsync_core::state::save(&dir.path().join("state"), &[7; 32], &session.persisted)
+            .unwrap();
+        let before = session.persisted.clone();
+        block_state_replacement(dir.path());
+        assert_eq!(
+            app.handle(Request::parse(br#"{"id":1,"method":"toggle"}"#).unwrap())
+                .1
+                .unwrap_err(),
+            "config_apply_pending"
+        );
+        restore_state_replacement(dir.path());
+        app.reload().unwrap();
+        let after = omaclipsync_core::state::load(&dir.path().join("state"), &[7; 32]).unwrap();
+        assert_eq!(after.state.device_id, before.state.device_id);
+        assert_eq!(after.token, before.token);
+        assert_eq!(after.state.cursor, before.state.cursor);
+        assert_eq!(after.state.pending, before.state.pending);
+        assert!(
+            after.state.discard_pending,
+            "an uncertain outbox must remain cancel-only, never eligible for retrying its body"
+        );
+        assert!(after.state.queued.is_none());
+        assert!(!app.config.sync.enabled);
+        assert!(app.session.is_none());
     }
 
     #[test]

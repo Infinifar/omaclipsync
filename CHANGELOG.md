@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 (2026-11-03)
+
+- Fail closed when a saved direction/pause change cannot clear encrypted state: adopt the saved selection, invalidate watcher/notification generations and quarantine the old session outside every sync path.
+- Retain cleanup across retries; re-read the saved configuration every 30 seconds while blocked. A resume cannot replace the saved restriction until cleanup succeeds. Preserve pairing and uncertain-upload cancellation intent across recovery.
+- Return an explicit application error and refresh shell configuration/status after failed changes. Add English/Chinese feedback and daemon/storage-failure and shell-reply regressions.
+- Keep shared core 0.4.0 and wire protocol 3 unchanged. Rebuild both native executables and compare their bytes before verified packaging.
+
 ## 0.4.0 (2026-11-03)
 
 - Require protocol 3 and RustClipSync Server 3.0.0; report direction/pause before receiving, with fenced WSS sessions and authenticated HTTP fallback.

@@ -13,6 +13,7 @@
   "repair_confirm": "确认重新配对",
   "repair_warning": "重新配对会丢弃尚未发送的同步数据，并登记新设备。",
   "storage_error": "加密同步状态不可用，同步已暂停",
+  "config_apply_pending": "设置已保存；状态恢复完成前，同步保持安全阻断。",
   "credentials": "请检查凭据或解锁密钥环",
   "needs_config": "请配置服务器",
   "config_error": "配置无效",

@@ -35,6 +35,7 @@ test:
     - cargo build --manifest-path core/Cargo.toml --locked --bin syncclipd
     - gjs tests/settings.gjs Settings.js
     - gjs tests/inbox.test.js Inbox.js
+    - gjs tests/service.test.js Service.qml
 
 reproduce:
   stage: reproduce

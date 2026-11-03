@@ -1,6 +1,6 @@
 # Omaclipsync
 
-Version **0.4.0**. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.0), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
+Version **0.4.1**. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.1), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
 
 Build provenance: release CI rebuilds both native executables in a digest-pinned container and compares them byte for byte before packaging. See [reproduction instructions](REPRODUCIBLE-BUILD.md) and the [native review guide](NATIVE-REVIEW.md). This does not replace marketplace security review.
 
@@ -113,6 +113,10 @@ Run these commands yourself only once the server and other clients are ready. Th
 Keep the printed backup path. If validation or enabling fails, retain the backup and inspect the error; do not move it again blindly.
 
 The plugin ID is `io.github.infinifar.omaclipsync`. The repository includes `bin/syncclipd` and `bin/syncclipctl`. Enabling it runs the bundled daemon; installation does not download a separate binary or start a second Quickshell.
+
+## Recovering a saved policy after a storage error
+
+If a pause or direction change is saved but encrypted-state cleanup fails, the saved selection remains visible and synchronization stays blocked. The old session cannot upload or restart its listener. The plugin re-reads the saved configuration every 30 seconds and retries cleanup; a resume cannot replace that saved restriction until cleanup succeeds. Resolve the local storage/permission error and let the retry complete, or save Settings again to retry. Failed operations show an explicit message instead of claiming a successful switch. Pairing, history and inbox data are not reset.
 
 ## Setup and use
 
