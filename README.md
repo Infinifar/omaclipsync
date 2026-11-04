@@ -1,9 +1,5 @@
 # Omaclipsync
 
-Version **0.4.1**. See the [release and downloads](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.1), [changes](CHANGELOG.md) and [validation](ACCEPTANCE.md).
-
-Build provenance: release CI rebuilds both native executables in a digest-pinned container and compares them byte for byte before packaging. See [reproduction instructions](REPRODUCIBLE-BUILD.md) and the [native review guide](NATIVE-REVIEW.md). This does not replace marketplace security review.
-
 English · [简体中文](README-ZH.md)
 
 <p align="center">

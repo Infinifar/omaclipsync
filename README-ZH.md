@@ -1,9 +1,5 @@
 # Omaclipsync
 
-当前版本 **0.4.1**，见 [版本与下载](https://github.com/Infinifar/omaclipsync/releases/tag/v0.4.1)、[改动记录](CHANGELOG.md) 与 [验收记录](ACCEPTANCE.md)。
-
-构建来源：发布 CI 在摘要固定的容器中从源码重建两个可执行文件，逐字节比较通过后才打包。参见[复现构建说明](REPRODUCIBLE-BUILD.md)及[原生代码审核索引](NATIVE-REVIEW.md)。这不等于市场安全审核通过。
-
 [English](README.md) · 简体中文
 
 <p align="center">
