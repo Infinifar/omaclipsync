@@ -1,7 +1,13 @@
 //! HTTPS transport for RustClipSync. It never follows redirects.
-use std::{io::Read, net::SocketAddr, sync::Mutex, time::Duration};
+use std::{
+    io::{self, Read},
+    net::SocketAddr,
+    sync::Mutex,
+    time::Duration,
+};
 
 use reqwest::blocking::{Client as Http, RequestBuilder, Response};
+use reqwest::header::HeaderMap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use url::Url;
 
@@ -9,7 +15,7 @@ use crate::{
     control::Control,
     direction::{
         DirectionErrorCode, SyncDirection, SyncDirectionError, SyncDirectionStatus,
-        MAX_DIRECTION_VERSION, MIN_PROTOCOL_VERSION,
+        MAX_DIRECTION_VERSION, PROTOCOL_VERSION,
     },
     state::{Ack, Message, Outbox, Persisted},
     Error, MAX_TEXT_BYTES,
@@ -178,27 +184,44 @@ impl Client {
     }
     pub(crate) fn perform(request: RequestBuilder) -> Result<Response, Error> {
         let response = request.send()?;
-        if response
-            .headers()
-            .get("x-rcs-protocol")
-            .and_then(|v| v.to_str().ok())
-            != Some("3")
-        {
-            return Err(Error::Protocol(SyncDirectionError {
-                code: DirectionErrorCode::ProtocolUnsupported,
-                version: None,
-                minimum_protocol_version: Some(MIN_PROTOCOL_VERSION),
-            }));
+        let status = response.status();
+        // An intermediary can answer before the sync server sees the request.
+        // Preserve its status and avoid interpreting its headers or error body.
+        if status.is_server_error() {
+            return Err(Error::Status(status.as_u16()));
         }
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
+        let protocol = Self::require_protocol(response.headers());
+        if status.as_u16() == 426 {
+            if let Ok(error) = Self::json::<SyncDirectionError>(response) {
+                if error.code == DirectionErrorCode::ProtocolUnsupported {
+                    return Err(Error::Protocol(error));
+                }
+            }
+            protocol?;
+            return Err(unexpected_response());
+        }
+        protocol?;
+        if !status.is_success() {
             let bytes = Self::bytes(response, MAX_META)?;
             if let Ok(error) = serde_json::from_slice::<SyncDirectionError>(&bytes) {
                 return Err(Error::Protocol(error));
             }
-            return Err(Error::Status(status));
+            return Err(Error::Status(status.as_u16()));
         }
         Ok(response)
+    }
+    pub(crate) fn require_protocol(headers: &HeaderMap) -> Result<(), Error> {
+        match headers.get("x-rcs-protocol").and_then(|v| v.to_str().ok()) {
+            Some("3") => Ok(()),
+            Some(version) if version.parse::<u32>().is_ok_and(|n| n != PROTOCOL_VERSION) => {
+                Err(Error::Protocol(SyncDirectionError {
+                    code: DirectionErrorCode::ProtocolUnsupported,
+                    version: None,
+                    minimum_protocol_version: None,
+                }))
+            }
+            _ => Err(unexpected_response()),
+        }
     }
     fn perform_data(
         &self,
@@ -423,6 +446,13 @@ impl Client {
     }
 }
 
+fn unexpected_response() -> Error {
+    Error::Io(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "unrecognized synchronization server response",
+    ))
+}
+
 pub(crate) fn valid_uuid(s: &str) -> bool {
     s.len() == 36
         && s.bytes().enumerate().all(|(i, c)| match i {
@@ -439,6 +469,87 @@ fn valid_token(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::TcpListener,
+    };
+
+    fn fixture_response(status: u16, header: &str, body: &str) -> Result<Response, Error> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let reply = format!(
+            "HTTP/1.1 {status} Fixture\r\n{header}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let worker = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(&socket);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            socket.write_all(reply.as_bytes()).unwrap();
+        });
+        let client = Http::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let result = Client::perform(client.get(format!("http://{address}/")));
+        worker.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn gateway_failure_retains_its_status_even_without_a_protocol_header() {
+        for status in [502, 503, 504, 530] {
+            assert!(
+                matches!(fixture_response(status, "", "gateway unavailable"), Err(Error::Status(n)) if n == status),
+                "gateway status {status} must be retryable"
+            );
+        }
+        assert!(matches!(
+            fixture_response(
+                530,
+                "X-RCS-Protocol: 3\r\n",
+                r#"{"code":"PROTOCOL_UNSUPPORTED"}"#
+            ),
+            Err(Error::Status(530))
+        ));
+    }
+
+    #[test]
+    fn only_explicit_protocol_mismatch_is_reported_as_an_upgrade() {
+        let error = fixture_response(
+            426,
+            "",
+            r#"{"code":"PROTOCOL_UNSUPPORTED","minimumProtocolVersion":4}"#,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, Error::Protocol(e) if e.code == DirectionErrorCode::ProtocolUnsupported && e.minimum_protocol_version == Some(4))
+        );
+        assert!(matches!(
+            fixture_response(200, "X-RCS-Protocol: 2\r\n", "{}"),
+            Err(Error::Protocol(e)) if e.code == DirectionErrorCode::ProtocolUnsupported
+        ));
+        for (status, header) in [(200, ""), (200, "X-RCS-Protocol: invalid\r\n"), (426, "")] {
+            assert!(
+                matches!(fixture_response(status, header, "foreign response"), Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::InvalidData)
+            );
+        }
+        assert!(matches!(
+            fixture_response(401, "X-RCS-Protocol: 3\r\n", r#"{"code":"UNAUTHENTICATED"}"#),
+            Err(Error::Protocol(e)) if e.code == DirectionErrorCode::Unauthenticated
+        ));
+    }
+
     #[test]
     fn accepts_only_canonical_v4_ids_and_safe_urls() {
         assert!(valid_uuid(&crate::state::random_uuid().unwrap()));

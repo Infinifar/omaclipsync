@@ -2,7 +2,7 @@
 
 English · [简体中文](README-ZH.md)
 
-The shared Rust core for RustClipSync clients, extracted from the Omaclipsync 0.2.0 synchronization implementation. Linux and Windows clients reuse its message state machine and HTTPS protocol with platform-specific adapters. This is a client library, not a server or a standalone desktop application.
+The shared Rust engine used by [RustClipSync Desktop](https://github.com/Infinifar/rustclipsync-desktop) on Windows/Linux and the [Omaclipsync plugin](https://github.com/Infinifar/omaclipsync). It provides protocol-3 direction control, durable synchronization, encrypted state, sensitive inboxes and optional conflict recovery. Clients supply platform adapters for clipboard access, storage and credentials.
 
 ## Release 0.4.0
 
@@ -15,7 +15,22 @@ The shared Rust core for RustClipSync clients, extracted from the Omaclipsync 0.
 | Windows/Linux desktop | 0.5.0 |
 | Omaclipsync | 0.4.0 |
 
-Mobile apps and Fcitx input methods are released separately. Check their wire-protocol support before switching a shared server; older clients need server 2.0.0. This release does not merge or publish those client projects.
+Mobile apps and Fcitx input methods are released separately. Check their wire-protocol support before switching a shared server; older clients need server 2.0.0. Android currently implements the protocol independently in Kotlin.
+
+## Features
+
+| Capability | Behavior |
+| --- | --- |
+| [Device direction and pause](#device-direction-and-protocol-3) | Push only, receive only or bidirectional; pause retains the selection. Report the policy and wait for an ACK before data access. The server filters deliveries, with local guards retained in the core. |
+| [WebSocket control and HTTP fallback](#device-direction-and-protocol-3) | Persistent authenticated WSS control; retry the identical operation over HTTPS if WSS fails. Session IDs and monotonic versions prevent delayed requests from restoring old settings. |
+| [Latest-only reconnect](#device-direction-and-protocol-3) | Consume only an authorized per-device delivery after direction confirmation. The server owns the backfill window; clients do not hardcode it or fetch the global clipboard to bypass it. |
+| [Durable conflict recovery](#optional-safe-conflict-recovery) | An explicit client opt-in cancels/skips a conflicting upload, preserves the local clipboard and resumes new copies. Recovery survives a network failure or restart. |
+| [Private sensitive inbox](#sensitive-inbox) | Keep the latest allowed marked-sensitive receive in encrypted state without writing the system clipboard. Disabling sensitive synchronization still permits ordinary receives. |
+| [Background receive APIs](#background-receive) | Receive into the private inbox without clipboard access, or explicitly opt into clipboard writes without reading a snapshot. Hosts own scheduling and platform permissions. |
+| [Encrypted durable state](src/state.rs) | RCS1 AES-256-GCM state retains device identity, pending uploads, receive cursors, the apply journal and recovery progress across restarts. Stable message IDs and acknowledgments suppress retries and echoes. |
+| [Metadata notification worker](src/worker.rs) | Long polling, coalesced notifications and connection backoff without copying clipboard bodies into the worker. Explicit shutdown/join and typed error chains support host lifecycle handling. |
+
+These are library capabilities. Each client chooses its UI, permissions and opt-ins; adding an API here does not enable it automatically in every client. This crate does not provide a desktop UI, server or end-to-end encryption.
 
 ## Current API
 
@@ -25,9 +40,10 @@ All network operations use `/api/...` and require wire protocol **3**. This rele
 
 | Module | Responsibility |
 | --- | --- |
+| `direction` | Protocol version, direction/pause DTOs, WebSocket frames, ACKs, structured errors and mutation validation |
 | `client` / `transport` | HTTPS registration and data, persistent WSS direction control with HTTP fallback, cancellation, acknowledgment and long polling; the transport interface supports offline tests |
-| `state` | UUID, epoch, revision, outbox, receive cursor and apply journal; compatible with the existing RCS1 AES-256-GCM state format |
-| `session` | Latest-only offline synchronization, retries with a stable message ID, conflict handling, sensitive-content settings, pre-apply checks and loop suppression |
+| `state` | UUID, epoch, revision, outbox, receive cursor, apply journal, sensitive inbox and conflict-recovery marker; compatible with existing RCS1 AES-256-GCM state |
+| `session` | Local direction/pause guards, latest-only synchronization, stable-ID retries, optional conflict recovery, sensitive policies, foreground/background receive and pre-apply checks |
 | `worker` | Metadata long polling, notification coalescing and connection backoff; clipboard text is not copied to the polling thread |
 | `Filter` | Regex filters for uploads and downloads |
 | `adapters` | Interfaces for system clipboard access, atomic state storage and optional history |
@@ -55,13 +71,12 @@ Synchronization entry points check restored pending content against the current 
 - Turning off sensitive synchronization while the current clipboard is marked sensitive does not block normal receives. Receive-side snapshot checks treat the policy rejection as an unavailable text value without reading its body; actual clipboard I/O failures still stop the operation. Incoming marked text remains filtered when sensitive synchronization is disabled.
 - Connects to the [RustClipSync server](https://github.com/Infinifar/rustclipsync-server) using its [protocol](https://github.com/Infinifar/rustclipsync-server/blob/main/PROTOCOL.md). Legacy SyncClipboard HTTP/SignalR transport is not implemented.
 - A UUID identifies one copy event and remains stable across retries. Revisions determine order; epochs separate server resets. Client time is used only for retry expiry, not ordering or uniqueness.
-- Automatic uploads do not silently overwrite conflicts; offline synchronization keeps only the latest value. When an upload outcome is uncertain, retain the request and resolve or cancel it before processing a newer value. Hosts may explicitly opt into `Session::recover_upload_conflict`: durably cancel the conflicting outbox and queued copies, skip the then-current authorized remote message, preserve the system clipboard, and resume fresh copy events. Recovery does not rebase or re-upload the rejected text. A durable marker makes `flush` resume cancellation/skip after network failure or restart. After `check`, hosts should also handle `has_observed_upload_conflict()` before normal receive, so legacy attempted outboxes are safely recovered on first launch of the fixed client. Hosts must discard watcher events observed during recovery before accepting fresh events; storage/epoch/credential failures still fail closed. Older encrypted state defaults the marker to false.
+- Automatic uploads do not silently overwrite conflicts; offline synchronization keeps only the latest value. When an upload outcome is uncertain, retain the request and resolve or cancel it before processing a newer value. [Safe conflict recovery](#optional-safe-conflict-recovery) requires an explicit host policy.
 - Persistent cursors and acknowledgments prevent replay. A message whose clipboard write outcome is unknown after a crash is recovered as `skipped`; exactly-once clipboard side effects are not guaranteed.
-- The host supplies sensitive markers; synchronization should be disabled by default. Neither markers nor regular expressions can identify all sensitive information.
+- The host supplies sensitive markers; marked-sensitive synchronization should be disabled by default. Neither markers nor regular expressions can identify all sensitive information.
 - TLS certificates are verified by default. Plain HTTP, credentials embedded in URLs and redirects are rejected. The explicit `insecure` option is intended only for controlled tests or self-signed environments.
 - State encryption protects files at rest, not end-to-end traffic; the server can read synchronized text. Text, keys and pairing passwords in memory are not currently guaranteed to be cleared immediately.
 - Text is limited to 10 MiB per item and state to 64 MiB. Long-poll worker shutdown waits for bounded direction negotiation plus the current HTTP request's 30-second timeout; hosts must avoid repeatedly creating overlapping workers.
-
 
 ## Device direction and protocol 3
 
@@ -70,6 +85,13 @@ serialized as `PUSH_ONLY`, `RECEIVE_ONLY`, `BIDIRECTIONAL`. Pause is a separate
 boolean and retains the chosen direction. Unknown, revoked and paused states
 receive no messages; receive-only and paused sessions cannot publish. The core
 retains local send/receive guards even when reporting fails.
+
+| State | Publish | Receive |
+| --- | --- | --- |
+| Push only | Yes | No |
+| Receive only | No | Yes |
+| Bidirectional | Yes | Yes |
+| Paused, unknown or revoked | No | No |
 
 ```rust,no_run
 use rustclipsync_core::direction::SyncDirection;
@@ -154,12 +176,72 @@ Custom `Transport` implementations must implement `set_sync_direction`,
 HTTP operations. The new public methods/types and `RemoteState.delivery_revision`
 are a Rust API break represented by crate 0.4.0.
 
+## Sensitive inbox
+
+With marked-sensitive synchronization explicitly enabled, clients can call
+`Session::use_sensitive_inbox(true)` to keep incoming sensitive text and the receive
+cursor in one encrypted state commit. The result is `Outcome::Stored`; the server
+acknowledgment is `skipped`, never a claim that the system clipboard was written.
+Only the latest inbox item is retained. `clear_inbox(id)` removes the matching item
+without resetting the cursor, so clearing it does not trigger a replay.
+
+Without the private inbox opt-in, foreground receives use the selected sensitive
+policy and normal clipboard path. With sensitive synchronization disabled, marked
+messages remain filtered; an already-sensitive local clipboard does not block
+ordinary receives. `HistorySink::record_marked` lets hosts withhold sensitive text
+from ordinary history. Notification identity never contains inbox text.
+
+Older encrypted files without an inbox or recovery marker load with empty/false
+defaults. The state limit is 64 MiB to accommodate pending, replacement and inbox
+items; the per-item text limit remains 10 MiB.
+
+## Background receive
+
+| API | Clipboard access | Receive policy |
+| --- | --- | --- |
+| `pull(observed, now)` | Reads a snapshot and may write | Foreground receive with snapshot and generation checks |
+| `pull_inbox(observed)` | Neither reads nor writes | Marked-sensitive messages only, with the encrypted inbox enabled; ordinary messages remain available for foreground receive |
+| `pull_background(observed, true)` | May write; never reads | Ordinary messages may be written; marked messages still obey the skip/inbox/write policy |
+
+`pull_background(observed, false)` is equivalent to `pull_inbox(observed)`.
+All paths retain direction, sensitive and regex filtering, validation, durable
+state and acknowledgment checks. Pairing and restored-outbox validation must
+finish through foreground `check` first; pending uploads and conflict recovery
+remain foreground work.
+
+Background writes require a separate explicit host opt-in. Without a readable
+clipboard snapshot, only the host's generation counter protects a newer local
+copy, so the UI must explain that another app's recent clipboard may be replaced.
+The core provides no background runtime, OS permission or scheduling guarantee.
+
+## Optional safe conflict recovery
+
+The default automatic-upload policy still returns `SyncError::Conflict` without
+overwriting the remote value. Hosts can explicitly choose safe skipping instead:
+
+1. After `check`, inspect `has_observed_upload_conflict()` before normal receive.
+   This also detects a restored, previously attempted outbox with an older baseline.
+2. On that condition or an upload conflict, call
+   `recover_upload_conflict(observed)` on the serialized session thread.
+3. The core persists the recovery decision, resolves the old upload through
+   cancellation, drops queued copies, and skips the then-current authorized remote
+   delivery. It preserves the local clipboard and never rebases or re-uploads the
+   rejected text. Cancellation cannot undo an upload already committed by the server.
+4. If interrupted, `flush` resumes the durable cancellation/skip after network
+   recovery or restart. The host discards watcher events observed during recovery
+   and accepts fresh copy events only after recovery completes.
+
+Storage failures, an epoch change and credential errors still stop synchronization;
+they are not ordinary conflicts. Omaclipsync **0.4.0** opts into this recovery.
+Other integrations, including the desktop client, retain their own conflict policy.
+
 ## Development and consumption
 
 ```bash
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 cargo fmt --all -- --check
+cargo doc --locked --no-deps
 ```
 
 With a server test binary available, run the HTTPS protocol integration test:
@@ -189,25 +271,6 @@ The Windows and Linux desktop client is [RustClipSync Desktop](https://github.co
 
 The [Omaclipsync plugin](https://github.com/Infinifar/omaclipsync) provides integration with the Omarchy shell. Both desktop clients and the plugin reuse this core through platform adapters. Android currently implements the same protocol in Kotlin without JNI.
 
-MIT license. The original implementation came from `Infinifar/omaclipsync`, extraction baseline commit `a8c330136886ad547dfadf386bb66901b3bbc45c`. New cross-platform interfaces, tests and export tools are maintained here.
-
-## 0.2.0: private sensitive inbox
-
-Clients can call `Session::use_sensitive_inbox(true)`. With sensitive synchronization enabled, incoming sensitive text and the receive cursor are stored in one encrypted state commit and acknowledged as `skipped`, without claiming a system clipboard write. Only the latest item is retained; `clear_inbox(id)` does not reset the cursor. Default receive behavior is unchanged. `HistorySink::record_marked` lets platforms exclude sensitive text from ordinary history; notification identity does not contain inbox text.
-
-The new `Persisted.inbox` field defaults to empty when reading older encrypted files. The state limit is now 64 MiB to accommodate worst-case pending, replacement and private inbox items. This Rust API change was released as crate 0.2.0 without changing the server HTTP protocol.
-
-### Clipboard-free background inbox receive
-
-`Session::pull_inbox(observed)` receives marked sensitive messages only when the
-private encrypted inbox is enabled. It reuses `pull` validation and persistence,
-never accesses the clipboard, and acknowledges durable inbox storage as `skipped`.
-Ordinary messages remain unconsumed for foreground `pull`; the server still only
-retains its latest value. Pairing and restored outbox checks must finish in the
-foreground first. Pending uploads are left for foreground resolution. Hosts own
-scheduling and platform lifetime limits; this API does not grant background runtime.
-
-`Session::pull_background(observed, true)` additionally permits clipboard writes
-without reading the clipboard, subject to the existing sensitive policy. Platforms
-must require a separate explicit opt-in: without a readable snapshot, another
-app's recently copied value may be overwritten. Pending uploads remain deferred.
+MIT license. The original implementation was extracted from Omaclipsync 0.2.0 in
+`Infinifar/omaclipsync`, baseline commit `a8c330136886ad547dfadf386bb66901b3bbc45c`.
+New cross-platform interfaces, tests and export tools are maintained here.

@@ -410,18 +410,7 @@ impl Socket {
         let (stream, response) =
             tungstenite::client::client_with_config(request, tls, Some(config))
                 .map_err(|e| Error::Io(io::Error::other(e)))?;
-        if response
-            .headers()
-            .get("x-rcs-protocol")
-            .and_then(|v| v.to_str().ok())
-            != Some("3")
-        {
-            return Err(Error::Protocol(SyncDirectionError {
-                code: DirectionErrorCode::ProtocolUnsupported,
-                version: None,
-                minimum_protocol_version: Some(MIN_PROTOCOL_VERSION),
-            }));
-        }
+        Client::require_protocol(response.headers())?;
         Ok(Self { stream })
     }
 }
